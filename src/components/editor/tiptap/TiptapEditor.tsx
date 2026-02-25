@@ -452,112 +452,6 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
         return doc;
     }, [activeNoteId]);
 
-    // Setup Yjs infrastructure
-    useEffect(() => {
-        if (!activeNoteId || !yDoc) {
-            setTitle('');
-            setReady(false);
-            return;
-        }
-
-        yDocRef.current = yDoc;
-
-        // IndexedDB persistence
-        const persistence = new IndexeddbPersistence(`onyx-note-${activeNoteId}`, yDoc);
-        persistenceRef.current = persistence;
-
-        persistence.on('synced', async () => {
-            // Try to load from Rust E2EE storage if Yjs doc is empty
-            const fragment = yDoc.getXmlFragment('default');
-            if (fragment.length === 0) {
-                try {
-                    const result = await invoke<{ content: string }>('load_note', { id: activeNoteId });
-                    const content = result?.content ?? '';
-                    if (content.trim().length > 0) {
-                        loadIntoYjsDoc(yDoc, content);
-                    }
-                } catch {
-                    // Rust E2EE not active — that's fine, offline mode
-                    console.warn('[TiptapEditor] load_note unavailable, offline mode');
-                }
-            }
-            setReady(true);
-        });
-
-        // Title binding via Yjs meta map
-        const metaMap = yDoc.getMap('meta');
-        const updateTitleFromMap = () => {
-            const newTitle = metaMap.get('title') as string;
-            if (newTitle !== undefined) {
-                setTitle(newTitle || '');
-            }
-        };
-        metaMap.observe(updateTitleFromMap);
-        updateTitleFromMap();
-
-        // WebSocket provider for real-time sync
-        const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:1234';
-
-        import('../../../lib/pocketbase').then(async ({ pb }) => {
-            if (!pb.authStore.isValid) return;
-
-            const token = pb.authStore.token;
-            const userId = pb.authStore.model?.id;
-            if (!token || !userId) return;
-
-            const roomName = `user-${userId}-note-${activeNoteId}`;
-            const provider = new HocuspocusProvider({
-                url: wsUrl,
-                name: roomName,
-                document: yDoc,
-                token: token,
-                onStatus: ({ status }) => {
-                    console.log('[TiptapEditor] Provider Status:', status);
-                },
-            });
-            providerRef.current = provider;
-
-            // Set awareness for collaboration cursors
-            const userColor = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
-            const userName = pb.authStore.model?.email?.split('@')[0] || 'User';
-            if (provider.awareness) {
-                provider.awareness.setLocalStateField('user', {
-                    name: userName,
-                    color: userColor,
-                });
-            }
-        });
-
-        // Debounced save to Rust E2EE
-        const saveObserver = () => {
-            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-            saveTimerRef.current = setTimeout(async () => {
-                try {
-                    const json = serialiseTiptapDoc(yDoc);
-                    await invoke('save_note', { id: activeNoteId, content: json });
-                } catch {
-                    // Rust not available
-                }
-            }, 500);
-        };
-
-        yDoc.on('update', saveObserver);
-
-        return () => {
-            console.log('[TiptapEditor] Cleaning up for note:', activeNoteId);
-            yDoc.off('update', saveObserver);
-            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-            if (providerRef.current) {
-                providerRef.current.destroy();
-                providerRef.current = null;
-            }
-            persistence.destroy();
-            persistenceRef.current = null;
-            yDoc.destroy();
-            yDocRef.current = null;
-        };
-    }, [activeNoteId, yDoc]);
-
     // Tiptap editor instance
     const editor = useEditor(
         {
@@ -674,7 +568,7 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
         [activeNoteId, yDoc, ready]
     );
 
-    // Handle title change
+    // All hooks must be called before any conditional return
     const handleTitleChange = useCallback(
         (e: React.ChangeEvent<HTMLInputElement>) => {
             const newTitle = e.target.value;
@@ -688,7 +582,6 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
         [activeNoteId, updateFile]
     );
 
-    // Handle title Enter → focus editor
     const handleTitleKeyDown = useCallback(
         (e: React.KeyboardEvent<HTMLInputElement>) => {
             if (e.key === 'Enter') {
@@ -698,6 +591,122 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
         },
         [editor]
     );
+
+    const handleInsertTemplate = useCallback(
+        (type: TemplateType) => {
+            if (!editor) return;
+            const content = getTemplate(type);
+            editor.commands.setContent(content);
+            setShowTemplates(false);
+        },
+        [editor]
+    );
+
+    // Setup Yjs infrastructure
+    useEffect(() => {
+        if (!activeNoteId || !yDoc) {
+            setTitle('');
+            setReady(false);
+            return;
+        }
+
+        yDocRef.current = yDoc;
+
+        // IndexedDB persistence
+        const persistence = new IndexeddbPersistence(`onyx-note-${activeNoteId}`, yDoc);
+        persistenceRef.current = persistence;
+
+        persistence.on('synced', async () => {
+            // Try to load from Rust E2EE storage if Yjs doc is empty
+            const fragment = yDoc.getXmlFragment('default');
+            if (fragment.length === 0) {
+                try {
+                    const result = await invoke<{ content: string }>('load_note', { id: activeNoteId });
+                    const content = result?.content ?? '';
+                    if (content.trim().length > 0) {
+                        loadIntoYjsDoc(yDoc, content);
+                    }
+                } catch {
+                    // Rust E2EE not active — that's fine, offline mode
+                    console.warn('[TiptapEditor] load_note unavailable, offline mode');
+                }
+            }
+            setReady(true);
+        });
+
+        // Title binding via Yjs meta map
+        const metaMap = yDoc.getMap('meta');
+        const updateTitleFromMap = () => {
+            const newTitle = metaMap.get('title') as string;
+            if (newTitle !== undefined) {
+                setTitle(newTitle || '');
+            }
+        };
+        metaMap.observe(updateTitleFromMap);
+        updateTitleFromMap();
+
+        // WebSocket provider for real-time sync
+        const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:1234';
+
+        import('../../../lib/pocketbase').then(async ({ pb }) => {
+            if (!pb.authStore.isValid) return;
+
+            const token = pb.authStore.token;
+            const userId = pb.authStore.model?.id;
+            if (!token || !userId) return;
+
+            const roomName = `user-${userId}-note-${activeNoteId}`;
+            const provider = new HocuspocusProvider({
+                url: wsUrl,
+                name: roomName,
+                document: yDoc,
+                token: token,
+                onStatus: ({ status }) => {
+                    console.log('[TiptapEditor] Provider Status:', status);
+                },
+            });
+            providerRef.current = provider;
+
+            // Set awareness for collaboration cursors
+            const userColor = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+            const userName = pb.authStore.model?.email?.split('@')[0] || 'User';
+            if (provider.awareness) {
+                provider.awareness.setLocalStateField('user', {
+                    name: userName,
+                    color: userColor,
+                });
+            }
+        });
+
+        // Debounced save to Rust E2EE
+        const saveObserver = () => {
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = setTimeout(async () => {
+                try {
+                    const json = serialiseTiptapDoc(yDoc);
+                    await invoke('save_note', { id: activeNoteId, content: json });
+                } catch {
+                    // Rust not available
+                }
+            }, 500);
+        };
+
+        yDoc.on('update', saveObserver);
+
+        return () => {
+            console.log('[TiptapEditor] Cleaning up for note:', activeNoteId);
+            yDoc.off('update', saveObserver);
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+            if (providerRef.current) {
+                providerRef.current.destroy();
+                providerRef.current = null;
+            }
+            persistence.destroy();
+            persistenceRef.current = null;
+            yDoc.destroy();
+            yDocRef.current = null;
+        };
+    }, [activeNoteId, yDoc]);
 
     // Zoom handler
     useEffect(() => {
@@ -761,16 +770,6 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
 
     // Check if editor is empty for template display
     const isEditorEmpty = editor?.isEmpty ?? true;
-
-    const handleInsertTemplate = useCallback(
-        (type: TemplateType) => {
-            if (!editor) return;
-            const content = getTemplate(type);
-            editor.commands.setContent(content);
-            setShowTemplates(false);
-        },
-        [editor]
-    );
 
     return (
         <div className="flex flex-col h-full relative tiptap-editor-wrapper" style={{ background: 'var(--onyx-editor)' }}>
