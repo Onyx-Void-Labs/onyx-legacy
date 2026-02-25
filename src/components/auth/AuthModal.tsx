@@ -19,13 +19,13 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
             {/* Ambient Background Orbs */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[100px] animate-pulse" />
-                <div className="absolute top-1/4 left-1/4 w-[300px] h-[300px] bg-blue-600/10 rounded-full blur-[80px]" />
-                <div className="absolute bottom-1/4 right-1/4 w-[300px] h-[300px] bg-emerald-600/10 rounded-full blur-[80px]" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-125 h-125 bg-purple-600/20 rounded-full blur-[100px] animate-pulse" />
+                <div className="absolute top-1/4 left-1/4 w-75 h-75 bg-blue-600/10 rounded-full blur-[80px]" />
+                <div className="absolute bottom-1/4 right-1/4 w-75 h-75 bg-emerald-600/10 rounded-full blur-[80px]" />
             </div>
 
             {/* Modal Content - Flush & Glassy */}
-            <div className="relative w-full max-w-[420px] bg-zinc-950/40 border border-white/10 rounded-[2rem] p-8 shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-5 duration-300 backdrop-blur-md">
+            <div className="relative w-full max-w-105 bg-zinc-950/40 border border-white/10 rounded-4xl p-8 shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-5 duration-300 backdrop-blur-md">
                 <button
                     onClick={onClose}
                     className="absolute top-5 right-5 p-2 text-zinc-500 hover:text-white transition-colors rounded-full hover:bg-white/5 z-50"

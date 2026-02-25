@@ -33,7 +33,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
@@ -41,12 +41,12 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
             />
 
             {/* Modal Container */}
-            <div className="relative w-full max-w-5xl max-h-[90vh] h-[700px] bg-[#09090b] border border-white/5 rounded-3xl shadow-2xl flex overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="relative w-full max-w-5xl max-h-[90vh] h-175 bg-[#09090b] border border-white/5 rounded-3xl shadow-2xl flex overflow-hidden animate-in zoom-in-95 duration-200">
 
                 {/* Close Button - Moved to avoid overlap */}
                 <button
                     onClick={() => toggleSettings(false)}
-                    className="absolute top-6 right-6 z-[70] p-2 text-zinc-500 hover:text-white hover:bg-white/10 rounded-full transition-all"
+                    className="absolute top-6 right-6 z-70 p-2 text-zinc-500 hover:text-white hover:bg-white/10 rounded-full transition-all"
                 >
                     <X size={20} />
                 </button>

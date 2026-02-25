@@ -94,7 +94,7 @@ export default function SettingsSidebar({ activeTab, setActiveTab, user }: Setti
                 ))}
 
                 <div className="px-2 pt-2">
-                    <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-white/5">
+                    <div className="p-3 rounded-xl bg-linear-to-br from-indigo-500/10 to-purple-500/10 border border-white/5">
                         <div className="text-xs font-semibold text-zinc-300">Onyx Pro</div>
                         <div className="text-[10px] text-zinc-500 mt-0.5">v0.0.3-alpha</div>
                     </div>

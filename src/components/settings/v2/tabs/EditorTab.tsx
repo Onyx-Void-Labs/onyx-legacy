@@ -65,7 +65,7 @@ export default function EditorTab() {
                             : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-700'
                             }`}
                     >
-                        <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/50 to-transparent z-10" />
+                        <div className="absolute inset-x-0 top-0 h-32 bg-linear-to-b from-black/50 to-transparent z-10" />
 
                         {/* Mini Window Visual */}
                         <div className="relative h-32 bg-[#1e1e2e] rounded-t-2xl border-b border-white/5 overflow-hidden flex font-mono text-[10px] leading-relaxed p-4 pt-6 mx-1 mt-1">
@@ -83,7 +83,7 @@ export default function EditorTab() {
                             </div>
                         </div>
 
-                        <div className="p-5 relative z-20 bg-gradient-to-t from-zinc-900/90 via-zinc-900/50 to-transparent -mt-10 pt-10">
+                        <div className="p-5 relative z-20 bg-linear-to-t from-zinc-900/90 via-zinc-900/50 to-transparent -mt-10 pt-10">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <div className={`text-sm font-bold transition-colors ${lineNumbers ? 'text-blue-400' : 'text-zinc-300'}`}>Line Numbers</div>
@@ -120,7 +120,7 @@ export default function EditorTab() {
                             </div>
                         </div>
 
-                        <div className="p-5 relative z-20 bg-gradient-to-t from-zinc-900/90 via-zinc-900/50 to-transparent -mt-10 pt-10">
+                        <div className="p-5 relative z-20 bg-linear-to-t from-zinc-900/90 via-zinc-900/50 to-transparent -mt-10 pt-10">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <div className={`text-sm font-bold transition-colors ${vimMode ? 'text-green-400' : 'text-zinc-300'}`}>Vim Mode</div>

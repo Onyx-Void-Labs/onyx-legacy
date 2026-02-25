@@ -145,7 +145,7 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onR
     return (
         <div
             ref={containerRef}
-            className="flex bg-gradient-to-r from-zinc-900/50 to-zinc-950/50 h-11 items-center px-3 gap-1.5 overflow-x-auto no-scrollbar border-b border-zinc-800/30 relative"
+            className="flex bg-linear-to-r from-zinc-900/50 to-zinc-950/50 h-11 items-center px-3 gap-1.5 overflow-x-auto no-scrollbar border-b border-zinc-800/30 relative"
         >
             {tabs.map((tabId, index) => {
                 const note = notes.find((n) => n.id === tabId);
@@ -212,13 +212,19 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onR
                         `}
                     >
                         {isActive && (
-                            <div className="absolute bottom-0 left-3 right-3 h-0.5 bg-gradient-to-r from-purple-500/50 via-purple-400 to-purple-500/50 rounded-full" />
+                            <div className="absolute bottom-0 left-3 right-3 h-0.5 bg-linear-to-r from-violet-500/50 via-violet-400 to-violet-500/50 rounded-full" />
                         )}
 
-                        <FileText size={14} className={`shrink-0 ${isActive ? 'text-purple-400' : 'text-zinc-600'}`} />
+                        <FileText size={14} className={`shrink-0 ${isActive ? 'text-violet-400' : 'text-zinc-600'}`} />
 
                         <span className="text-sm font-medium truncate flex-1 tracking-tight">
-                            {note?.title || "Untitled"}
+                            {tabId === '__today__'
+                              ? 'Today'
+                              : tabId === '__flashcards__'
+                                ? 'Flashcards'
+                                : tabId.startsWith('__collection:')
+                                  ? `All ${tabId.slice('__collection:'.length)}s`
+                                  : (note?.title || 'Untitled')}
                         </span>
 
                         <button

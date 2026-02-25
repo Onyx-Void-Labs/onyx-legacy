@@ -436,14 +436,14 @@ export default function DataTab() {
                             checked={mirrorEnabled}
                             onChange={(e) => updateSettings({ mirrorEnabled: e.target.checked })}
                         />
-                        <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                        <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
                     </label>
                 </div>
 
                 {mirrorEnabled && (
                     <div className="mt-4 space-y-4 animate-in fade-in slide-in-from-top-1">
                         <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex gap-3 items-start">
-                            <div className="mt-0.5 min-w-[16px] text-amber-500">
+                            <div className="mt-0.5 min-w-4 text-amber-500">
                                 <Shield size={16} />
                             </div>
                             <p className="text-xs text-amber-200/80 leading-relaxed">
@@ -490,7 +490,7 @@ export default function DataTab() {
                                     checked={mirrorDeleteToBin}
                                     onChange={(e) => updateSettings({ mirrorDeleteToBin: e.target.checked })}
                                 />
-                                <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                                <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
                             </label>
                         </div>
                     </div>

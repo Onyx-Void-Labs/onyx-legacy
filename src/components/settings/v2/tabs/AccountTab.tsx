@@ -189,13 +189,13 @@ export default function AccountTab({ user, onLogout, showAuth, setShowAuth }: Ac
         }
     };
 
-    if (!user) {
+    if (!user || showAuth) {
         if (showAuth) {
             // FULL SCREEN TAKEOVER for Auth
             return (
                 <div className="h-full flex flex-col items-center justify-center animate-in fade-in zoom-in-95 duration-500">
                     <div className="w-full max-w-lg">
-                        <AuthForms onCancel={() => setShowAuth(false)} onSuccess={() => { }} />
+                        <AuthForms onCancel={() => setShowAuth(false)} onSuccess={() => setShowAuth(false)} />
                     </div>
                 </div>
             )
@@ -214,11 +214,11 @@ export default function AccountTab({ user, onLogout, showAuth, setShowAuth }: Ac
 
                 {/* Profile Card - Beautified - No Border, No Shadow Box */}
                 <div className="p-6 bg-white/5 rounded-3xl flex items-center gap-6 group transition-all duration-300 relative overflow-hidden backdrop-blur-md hover:scale-[1.02]">
-                    <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-blue-500/5 to-transparent pointer-events-none group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute inset-0 bg-linear-to-br from-purple-500/5 via-blue-500/5 to-transparent pointer-events-none group-hover:opacity-100 transition-opacity duration-500" />
                     <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/5 blur-[80px] rounded-full pointer-events-none group-hover:bg-purple-500/10 transition-all duration-500" />
 
                     <div
-                        className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-500/20 relative group/localavatar cursor-pointer overflow-hidden z-10 hover:scale-105 transition-transform duration-300"
+                        className="w-20 h-20 bg-linear-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-500/20 relative group/localavatar cursor-pointer overflow-hidden z-10 hover:scale-105 transition-transform duration-300"
                         onClick={() => document.getElementById('local-avatar-upload')?.click()}
                     >
                         {localAvatar ? (
@@ -243,7 +243,7 @@ export default function AccountTab({ user, onLogout, showAuth, setShowAuth }: Ac
                             {isEditingName ? (
                                 <input
                                     autoFocus
-                                    className="bg-transparent text-2xl font-bold text-white focus:outline-none border-b border-purple-500/50 mb-1 w-full max-w-[200px]"
+                                    className="bg-transparent text-2xl font-bold text-white focus:outline-none border-b border-purple-500/50 mb-1 w-full max-w-50"
                                     value={localName}
                                     onChange={(e) => setLocalName(e.target.value)}
                                     onBlur={() => {
@@ -271,19 +271,19 @@ export default function AccountTab({ user, onLogout, showAuth, setShowAuth }: Ac
                 <div
                     className="relative rounded-[40px] overflow-hidden transition-all duration-300 group/hero shadow-2xl shadow-black/50 shimmer-trigger hover:scale-[1.02] backface-hidden transform-gpu"
                 >
-                    <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-zinc-900/90 to-black/95 backdrop-blur-xl group-hover/hero:bg-zinc-900/90 transition-colors duration-500" />
+                    <div className="absolute inset-0 bg-linear-to-br from-purple-900/20 via-zinc-900/90 to-black/95 backdrop-blur-xl group-hover/hero:bg-zinc-900/90 transition-colors duration-500" />
                     {/* Reduced Glow */}
                     <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500/5 blur-[150px] rounded-full pointer-events-none group-hover/hero:bg-purple-500/5 transition-all duration-1000 group-hover/hero:translate-x-10 group-hover/hero:-translate-y-10" />
 
                     <div className="relative z-10 py-11 px-10 text-center space-y-8">
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8 pointer-events-none">
                             {/* Icon Container - No Inset Shadow (Clean) */}
-                            <div className="w-24 h-24 bg-gradient-to-tr from-purple-500/10 to-blue-500/10 rounded-3xl flex items-center justify-center mx-auto border border-white/5 relative overflow-hidden group/icon pointer-events-auto hover:bg-purple-500/10 hover:border-purple-500/20 transition-all duration-300">
-                                <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/20 via-transparent to-blue-500/20 opacity-0 group-hover/icon:opacity-100 transition-opacity duration-700" />
+                            <div className="w-24 h-24 bg-linear-to-tr from-purple-500/10 to-blue-500/10 rounded-3xl flex items-center justify-center mx-auto border border-white/5 relative overflow-hidden group/icon pointer-events-auto hover:bg-purple-500/10 hover:border-purple-500/20 transition-all duration-300">
+                                <div className="absolute inset-0 bg-linear-to-tr from-purple-500/20 via-transparent to-blue-500/20 opacity-0 group-hover/icon:opacity-100 transition-opacity duration-700" />
 
                                 {/* Animated Rings - Only on Icon Hover */}
-                                <div className="absolute inset-0 border border-purple-500/20 rounded-3xl scale-75 opacity-0 group-hover/icon:scale-110 group-hover/icon:opacity-100 transition-all duration-[2500ms] delay-100" />
-                                <div className="absolute inset-0 border border-blue-500/20 rounded-3xl scale-50 opacity-0 group-hover/icon:scale-125 group-hover/icon:opacity-100 transition-all duration-[2500ms] delay-200" />
+                                <div className="absolute inset-0 border border-purple-500/20 rounded-3xl scale-75 opacity-0 group-hover/icon:scale-110 group-hover/icon:opacity-100 transition-all duration-2500 delay-100" />
+                                <div className="absolute inset-0 border border-blue-500/20 rounded-3xl scale-50 opacity-0 group-hover/icon:scale-125 group-hover/icon:opacity-100 transition-all duration-2500 delay-200" />
 
                                 <Crown size={40} className="text-white z-10 relative" />
                             </div>
@@ -321,7 +321,7 @@ export default function AccountTab({ user, onLogout, showAuth, setShowAuth }: Ac
             <div className="p-6 bg-zinc-900/50 rounded-3xl flex items-center gap-6 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/5 blur-[100px] rounded-full pointer-events-none group-hover:bg-purple-500/10 transition-all duration-1000" />
 
-                <div className="w-20 h-20 bg-gradient-to-br from-zinc-800 to-zinc-900 rounded-2xl flex items-center justify-center border border-white/10 shadow-xl z-10 relative group/avatar cursor-pointer overflow-hidden">
+                <div className="w-20 h-20 bg-linear-to-br from-zinc-800 to-zinc-900 rounded-2xl flex items-center justify-center border border-white/10 shadow-xl z-10 relative group/avatar cursor-pointer overflow-hidden">
                     {decryptedAvatar ? (
                         <img
                             src={decryptedAvatar}
@@ -375,7 +375,7 @@ export default function AccountTab({ user, onLogout, showAuth, setShowAuth }: Ac
                     {isEditingCloudName ? (
                         <input
                             autoFocus
-                            className="bg-transparent text-2xl font-bold text-white focus:outline-none border-b border-purple-500/50 mb-1 w-full max-w-[200px]"
+                            className="bg-transparent text-2xl font-bold text-white focus:outline-none border-b border-purple-500/50 mb-1 w-full max-w-50"
                             value={cloudName}
                             onChange={(e) => setCloudName(e.target.value)}
                             onBlur={async () => {
@@ -442,7 +442,7 @@ export default function AccountTab({ user, onLogout, showAuth, setShowAuth }: Ac
                     <span>12% Used (120MB / 1GB)</span>
                 </div>
                 <div className="h-3 w-full bg-zinc-900 rounded-full overflow-hidden border border-white/5">
-                    <div className="h-full w-[12%] bg-gradient-to-r from-purple-600 to-blue-500 rounded-full shadow-[0_0_15px_rgba(168,85,247,0.5)]" />
+                    <div className="h-full w-[12%] bg-linear-to-r from-purple-600 to-blue-500 rounded-full shadow-[0_0_15px_rgba(168,85,247,0.5)]" />
                 </div>
             </div>
 

@@ -1,78 +1,82 @@
 # 💎 ONYX Notes
 
-A modular, local-first note-taking application designed for speed, privacy, and aesthetics. Built with **Tauri**, **React**, and **CodeMirror 6** for a high-performance, native-like experience.
+A modular, blazing-fast, local-first note-taking app for privacy, beauty, and deep study. Built with **Tauri**, **React**, **TipTap**, and **Yjs** for collaborative, native-like performance across Windows, macOS, and Linux.
 
-> **Current Version**: `v0.0.2-alpha`
+> **Current Version:** `v0.0.2-alpha`
+
+---
 
 ## 🚀 Features
 
-### ✅ Implemented
-- **Core Engine (CodeMirror 6)**:
-  - Replaced legacy block editor with a high-performance text engine.
-  - **Hybrid Markdown**: Markdown syntax is hidden while you type, giving a rich-text feel while keeping plain-text portability.
-  - **Math Support**: Full LaTeX support using KaTeX. Use `$$` for block math and `$` for inline.
-  - **Smart Lists**: Auto-indenting bullets and numbered lists.
-  - **Code Folding**: Collapse headers and sections for focused editing.
+### ✨ Core Engine
+- **TipTap Editor:** Rich-text editing powered by TipTap 3, with custom extensions and nodes.
+- **Hybrid Markdown:** Markdown syntax is hidden while you type, giving a seamless rich-text feel with plain-text portability.
+- **Math Support:** Full LaTeX with KaTeX. `$...$` for inline, `$$...$$` for blocks.
+- **Smart Lists:** Auto-indenting bullets & numbers.
+- **Code Folding:** Collapse headers/sections for focus.
 
-- **Strict Search Engine**:
-  - Zero-latency "Live Indexing" search.
-  - **Strict Matching**: No fuzzy guessing. Exact matches only.
-  - **Native Highlights**: Search matches look and feel like native text selection.
+### 🔍 Search
+- **Live Indexing:** Zero-latency, strict matching—no fuzzy guessing.
+- **Native Highlights:** Matches feel like real text selection.
 
-- **Security & Privacy**:
-  - **Local-First**: Data lives on your disk, not our cloud.
-  - **Encryption**: AES-256-GCM encryption for "Locked Notes". Password-protected at rest.
+### 🔒 Security & Privacy
+- **Local-First:** Your data stays on your device.
+- **AES-256-GCM Encryption:** Lock notes, password-protected at rest.
 
-- **Premium UI/UX**:
-  - "Discord-like" dark aesthetic.
-  - **Fluid Tabs**: Browser-grade dragging (dnd-kit) with FLIP animations.
-  - **Glassmorphism**: Subtle translucent effects and smooth transitions.
+### 🤝 Real-Time Collaboration
+- **Yjs CRDT:** Real-time sync and collaboration, powered by Yjs and Hocuspocus WebSocket server.
+- **Offline-first:** Changes sync automatically when online.
 
-- **Infrastructure**:
-  - **Auto-Updater**: Built-in support for background updates.
-  - **Cross-Platform**: Builds native binaries for **Windows** (`.exe`), **macOS** (`.dmg`), and **Linux** (`.deb`).
+### 🎨 UI/UX
+- **Discord-inspired Dark Mode**
+- **Fluid Tabs:** Browser-grade drag & drop (dnd-kit, FLIP animations).
+- **Glassmorphism:** Subtle translucency, smooth transitions.
 
-### 🚧 Roadmap
-- [ ] **Mobile App**: Native Android port (Tablet/Phone support).
-- [ ] **Cloud Sync**: Optional encrypted sync (Git/S3/WebDAV).
-- [ ] **Command Palette**: `Ctrl+Shift+P` for keyboard-only control.
-- [ ] **Plugin System**: API for community extensions.
-- [ ] **Export**: PDF and HTML export with themes.
+### 🛠 Infrastructure
+- **Auto-Updater:** Background updates, always fresh.
+- **Cross-Platform:** Native builds for Windows (`.exe`), macOS (`.dmg`), Linux (`.deb`).
+
+---
+
+## 🗺 Roadmap
+
+- [ ] **Mobile App:** Native Android (tablet/phone)
+- [ ] **Encrypted Cloud Sync:** Git/S3/WebDAV
+- [ ] **Command Palette:** `Ctrl+Shift+P` for keyboard control
+- [ ] **Plugin System:** Community extension API
+- [ ] **Export:** PDF & HTML with themes
+
+---
 
 ## 🛠️ Setup & Development
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (Latest LTS)
-- [Rust](https://www.rust-lang.org/tools/install) (Required for Tauri)
+- [Rust](https://www.rust-lang.org/tools/install) (for Tauri)
 
-### Installation
+### Quickstart
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/om-itani/onyx.git
-   cd onyx
-   ```
+```bash
+git clone https://github.com/Onyx-Void-Labs/onyx.git
+cd onyx
+npm install
+npm run tauri dev
+```
+*Runs React frontend, TipTap editor, Yjs sync, and Tauri backend with hot reload.*
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+### Build for Production
 
-3. **Run in Development Mode**
-   ```bash
-   npm run tauri dev
-   ```
-   *Starts the React frontend and Tauri native host with hot-reload.*
-
-### Building for Production
-To build individual binaries:
 ```bash
 npm run tauri build
 ```
-*Artifacts will be in `src-tauri/target/release/bundle`*
-
-## 🤝 Contributing
-ONYX is open source and active. Feel free to open issues or PRs!
+*Binaries in `src-tauri/target/release/bundle`*
 
 ---
+
+## 🤝 Contributing
+
+ONYX is open source and active—issues and PRs welcome!
+
+---
+
 *Created by [Omar Itani](https://github.com/om-itani)*

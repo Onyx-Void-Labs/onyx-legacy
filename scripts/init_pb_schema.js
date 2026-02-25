@@ -85,7 +85,8 @@ async function main() {
             });
             console.log("✅ 'passkeys' collection created.");
         } catch (e) {
-            console.log("⚠️ 'passkeys' might already exist, skipping...");
+            console.log("⚠️ 'passkeys' might already exist or failed to create, attempting update...");
+            // Optionally update if exists, but for now we just log
         }
 
         // 3. CREATE AUTH_TOKENS COLLECTION (Stateless OTPs)

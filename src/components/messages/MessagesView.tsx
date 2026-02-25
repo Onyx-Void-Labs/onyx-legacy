@@ -2,79 +2,87 @@ import { Hash, Volume2, Plus, Search, ChevronDown, Smile, Paperclip, Send, Shiel
 
 // ─── Messages View (Discord-like layout placeholder) ─────────────────────────
 
-export default function MessagesView() {
+interface MessagesViewProps {
+    sidebarCollapsed?: boolean;
+}
+
+export default function MessagesView({ sidebarCollapsed = false }: MessagesViewProps) {
     return (
         <div className="flex h-full overflow-hidden">
             {/* Server / DM Sidebar */}
-            <div className="w-[72px] bg-zinc-950 flex flex-col items-center py-3 gap-2 border-r border-zinc-800/30 shrink-0">
-                {/* Home / DMs button */}
-                <button className="w-12 h-12 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center hover:rounded-xl hover:bg-blue-500/30 transition-all duration-200">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M19.73 4.87l-15.46 6.27a.5.5 0 00.01.95l5.15 1.72 1.72 5.15a.5.5 0 00.95.01l6.27-15.46a.5.5 0 00-.64-.64z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                </button>
-
-                <div className="w-8 border-t border-zinc-800/50 my-1" />
-
-                {/* Sample servers */}
-                {['🎮', '💻', '🎵', '📚'].map((emoji, i) => (
-                    <button
-                        key={i}
-                        className="w-12 h-12 rounded-3xl bg-zinc-800/60 text-lg flex items-center justify-center hover:rounded-xl hover:bg-blue-500/20 transition-all duration-200 group"
-                    >
-                        <span className="group-hover:scale-110 transition-transform">{emoji}</span>
+            <div className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0 opacity-0 border-none px-0' : 'w-[72px] opacity-100 border-r border-zinc-800/30'}`}>
+                <div className="w-[72px] h-full bg-zinc-950 flex flex-col items-center py-3 gap-2">
+                    {/* Home / DMs button */}
+                    <button className="w-12 h-12 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center hover:rounded-xl hover:bg-blue-500/30 transition-all duration-200">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M19.73 4.87l-15.46 6.27a.5.5 0 00.01.95l5.15 1.72 1.72 5.15a.5.5 0 00.95.01l6.27-15.46a.5.5 0 00-.64-.64z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     </button>
-                ))}
 
-                {/* Add Server */}
-                <button className="w-12 h-12 rounded-3xl bg-zinc-800/40 text-emerald-400 flex items-center justify-center hover:rounded-xl hover:bg-emerald-500/20 transition-all duration-200">
-                    <Plus size={20} />
-                </button>
+                    <div className="w-8 border-t border-zinc-800/50 my-1" />
+
+                    {/* Sample servers */}
+                    {['🎮', '💻', '🎵', '📚'].map((emoji, i) => (
+                        <button
+                            key={i}
+                            className="w-12 h-12 rounded-3xl bg-zinc-800/60 text-lg flex items-center justify-center hover:rounded-xl hover:bg-blue-500/20 transition-all duration-200 group"
+                        >
+                            <span className="group-hover:scale-110 transition-transform">{emoji}</span>
+                        </button>
+                    ))}
+
+                    {/* Add Server */}
+                    <button className="w-12 h-12 rounded-3xl bg-zinc-800/40 text-emerald-400 flex items-center justify-center hover:rounded-xl hover:bg-emerald-500/20 transition-all duration-200">
+                        <Plus size={20} />
+                    </button>
+                </div>
             </div>
 
             {/* Channel Sidebar */}
-            <div className="w-60 bg-zinc-900/60 flex flex-col border-r border-zinc-800/30 shrink-0">
-                {/* Server Header */}
-                <div className="h-12 px-4 flex items-center justify-between border-b border-zinc-800/30 shrink-0">
-                    <span className="text-sm font-semibold text-zinc-200 truncate">Onyx Community</span>
-                    <ChevronDown size={16} className="text-zinc-500" />
-                </div>
-
-                {/* Channels */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-4">
-                    {/* Text Channels */}
-                    <div>
-                        <div className="flex items-center gap-1 px-2 py-1">
-                            <ChevronDown size={10} className="text-zinc-500" />
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Text Channels</span>
-                        </div>
-                        {['general', 'development', 'design', 'off-topic'].map((ch, i) => (
-                            <button
-                                key={ch}
-                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${i === 0
-                                        ? 'bg-zinc-800/60 text-zinc-100'
-                                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
-                                    }`}
-                            >
-                                <Hash size={16} className="shrink-0 text-zinc-600" />
-                                <span className="truncate">{ch}</span>
-                            </button>
-                        ))}
+            <div className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0 opacity-0 border-none' : 'w-60 opacity-100 border-r border-zinc-800/30'}`}>
+                <div className="w-60 h-full flex flex-col bg-zinc-900/60">
+                    {/* Server Header */}
+                    <div className="h-12 px-4 flex items-center justify-between border-b border-zinc-800/30 shrink-0">
+                        <span className="text-sm font-semibold text-zinc-200 truncate">Onyx Community</span>
+                        <ChevronDown size={16} className="text-zinc-500" />
                     </div>
 
-                    {/* Voice Channels */}
-                    <div>
-                        <div className="flex items-center gap-1 px-2 py-1">
-                            <ChevronDown size={10} className="text-zinc-500" />
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Voice Channels</span>
+                    {/* Channels */}
+                    <div className="flex-1 overflow-y-auto p-2 space-y-4">
+                        {/* Text Channels */}
+                        <div>
+                            <div className="flex items-center gap-1 px-2 py-1">
+                                <ChevronDown size={10} className="text-zinc-500" />
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Text Channels</span>
+                            </div>
+                            {['general', 'development', 'design', 'off-topic'].map((ch, i) => (
+                                <button
+                                    key={ch}
+                                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${i === 0
+                                        ? 'bg-zinc-800/60 text-zinc-100'
+                                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
+                                        }`}
+                                >
+                                    <Hash size={16} className="shrink-0 text-zinc-600" />
+                                    <span className="truncate">{ch}</span>
+                                </button>
+                            ))}
                         </div>
-                        {['Lounge', 'Gaming', 'Music'].map(ch => (
-                            <button
-                                key={ch}
-                                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30 transition-colors"
-                            >
-                                <Volume2 size={16} className="shrink-0 text-zinc-600" />
-                                <span className="truncate">{ch}</span>
-                            </button>
-                        ))}
+
+                        {/* Voice Channels */}
+                        <div>
+                            <div className="flex items-center gap-1 px-2 py-1">
+                                <ChevronDown size={10} className="text-zinc-500" />
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Voice Channels</span>
+                            </div>
+                            {['Lounge', 'Gaming', 'Music'].map(ch => (
+                                <button
+                                    key={ch}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30 transition-colors"
+                                >
+                                    <Volume2 size={16} className="shrink-0 text-zinc-600" />
+                                    <span className="truncate">{ch}</span>
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>

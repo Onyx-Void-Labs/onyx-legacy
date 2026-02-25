@@ -1,33 +1,51 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 
-import Sidebar from "./components/ui/Sidebar";
-import Editor from "./components/editor/Editor";
-import TabBar from "./components/ui/TabBar";
-import Titlebar from "./components/ui/Titlebar";
-import SearchModal from "./components/ui/SearchModal";
-import { pb } from "./lib/pocketbase";
+
+import Sidebar from "@/components/ui/Sidebar";
+import TabBar from "@/components/ui/TabBar";
+import Titlebar from "@/components/ui/Titlebar";
+import SearchModal from "@/components/ui/SearchModal";
+import NoteTypePicker from "@/components/ui/NoteTypePicker";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import OnboardingFlow, { shouldShowOnboarding } from "@/components/ui/OnboardingFlow";
+import { pb } from "@/lib/pocketbase";
+import Editor from "@/components/editor/Editor";
+import TodayPage from "@/components/editor/TodayPage";
+import FlashcardView from "@/components/editor/FlashcardView";
+import CollectionView from "@/components/editor/CollectionView";
+import PropertiesPanel from "@/components/editor/PropertiesPanel";
+import PropertyPills from "@/components/editor/PropertyPills";
+import TopicQuery from "@/components/editor/TopicQuery";
+import TrashView from "@/components/editor/TrashView";
 
 import { remove } from "@tauri-apps/plugin-fs";
 import { documentDir, join } from "@tauri-apps/api/path";
 
-import { useSync } from "./contexts/SyncContext";
-import { SettingsProvider, useSettings } from "./contexts/SettingsContext";
-import { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
-import SettingsModal from "./components/settings/v2/SettingsModal";
-import AuthModal from "./components/auth/AuthModal";
+import { useSync } from "@/contexts/SyncContext";
+import { SettingsProvider, useSettings } from "@/contexts/SettingsContext";
+import { WorkspaceProvider, useWorkspace } from "@/contexts/WorkspaceContext";
+import SettingsModal from "@/components/settings/v2/SettingsModal";
+import AuthModal from "@/components/auth/AuthModal";
+
+import type { NoteType, FileMeta } from "@/types/sync";
 
 // Module Views
-import MessagesView from "./components/messages/MessagesView";
-import CalendarView from "./components/calendar/CalendarView";
-import EmailView from "./components/email/EmailView";
-import PhotosView from "./components/photos/PhotosView";
-import PasswordsView from "./components/passwords/PasswordsView";
-import CloudView from "./components/cloud/CloudView";
+import MessagesView from "@/components/messages/MessagesView";
+import CalendarView from "@/components/calendar/CalendarView";
+import EmailView from "@/components/email/EmailView";
+import PhotosView from "@/components/photos/PhotosView";
+import PasswordsView from "@/components/passwords/PasswordsView";
+import CloudView from "@/components/cloud/CloudView";
+
+const TODAY_SENTINEL = '__today__';
+const FLASHCARD_SENTINEL = '__flashcards__';
+const TRASH_SENTINEL = '__trash__';
+const COLLECTION_PREFIX = '__collection:'; // e.g. __collection:task
 
 function AppContent() {
   // Use Sync Context for File List (Single Source of Truth)
-  const { files, deleteFile } = useSync();
+  const { files, deleteFile, createFile } = useSync();
   const { toggleSettings, settings } = useSettings();
   const { activeWorkspace } = useWorkspace();
 
@@ -38,37 +56,47 @@ function AppContent() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [user, setUser] = useState<any>(pb.authStore.model);
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
+  const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => shouldShowOnboarding());
 
   useEffect(() => {
-    // Subscribe to auth changes
     const unsubscribe = pb.authStore.onChange((_token, model) => {
       setUser(model);
     });
-
-    return () => {
-      unsubscribe();
-    };
+    return () => { unsubscribe(); };
   }, []);
 
   const handleLogout = () => {
     pb.authStore.clear();
   };
 
-
   // Cleanup tabs when files are deleted remotely
   useEffect(() => {
     const loadedNoteIds = new Set(files.map(n => n.id));
-    const validTabs = tabs.filter(tabId => loadedNoteIds.has(tabId));
+    const isSentinel = (id: string) =>
+      id === TODAY_SENTINEL || id === FLASHCARD_SENTINEL || id === TRASH_SENTINEL || id.startsWith(COLLECTION_PREFIX);
+    const validTabs = tabs.filter(tabId => isSentinel(tabId) || loadedNoteIds.has(tabId));
 
     if (validTabs.length !== tabs.length) {
-      console.log("Reconciling tabs: Closing deleted notes");
       setTabs(validTabs);
-
-      if (activeTabId !== null && !loadedNoteIds.has(activeTabId)) {
+      if (activeTabId !== null && !isSentinel(activeTabId) && !loadedNoteIds.has(activeTabId)) {
         setActiveTabId(validTabs.length > 0 ? validTabs[validTabs.length - 1] : null);
       }
     }
   }, [files, tabs, activeTabId]);
+
+  // Listen for note-link navigation events from the editor
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.noteId) {
+        openTab(detail.noteId, true);
+      }
+    };
+    window.addEventListener('onyx:open-note', handler);
+    return () => window.removeEventListener('onyx:open-note', handler);
+  }, [tabs, activeTabId]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -149,45 +177,32 @@ function AppContent() {
     }
   };
 
-  // Import at top level needed (handled by next tool or assume globals? No, imports needed)
-  // But for this block:
   const handleDeleteNote = async (id: string) => {
     try {
-      // 1. Delete from Sync Context (Database)
       deleteFile(id);
 
-      // 2. Delete Mirror File (if enabled)
       if (settings.mirrorEnabled) {
         try {
           let basePath = settings.mirrorPath;
-          // Resolve default path if not set
           if (!basePath) {
             const docs = await documentDir();
             basePath = await join(docs, 'Onyx Notes');
           }
-
-          // PERSISTENT FILE MAPPING: Use localStorage to get the actual filename
           const storedFilename = localStorage.getItem(`mirror-filename-${id}`);
           if (storedFilename) {
             const fileName = `${storedFilename}.md`;
             const fullPath = await join(basePath, fileName);
 
-            // Delete file (to bin or permanent based on setting)
             if (settings.mirrorDeleteToBin) {
               const { invoke } = await import('@tauri-apps/api/core');
               await invoke('move_to_trash', { path: fullPath });
-              console.log('[App] Moved mirror file to Recycle Bin:', fullPath);
             } else {
               await remove(fullPath);
-              console.log('[App] Deleted mirror file permanently:', fullPath);
             }
-
-            // Clean up localStorage entry
             localStorage.removeItem(`mirror-filename-${id}`);
           }
         } catch (err) {
           console.error('[App] Failed to delete mirror file:', err);
-          // Don't block UI for this failure
         }
       }
 
@@ -212,12 +227,78 @@ function AppContent() {
     console.warn("Locking not yet implemented for Pure Yjs");
   };
 
-  // ─── Determine sidebar visibility per module ────────────────────────────
-  // Some modules have their own built-in sidebars (messages, email, photos, cloud)
-  // Notes uses the existing sidebar. Calendar has its own agenda sidebar.
+  // ─── New note via type picker ────────────────────────────────────
+  const handleNewNoteWithType = useCallback(
+    (type: NoteType) => {
+      try {
+        const newId = createFile('Untitled', type);
+        openTab(newId, true);
+      } catch (err) {
+        console.error('Failed to create note:', err);
+      }
+    },
+    [createFile]
+  );
+
+  // ─── Go to Today Page ────────────────────────────────────────────
+  const handleGoToToday = useCallback(() => {
+    if (tabs.includes(TODAY_SENTINEL)) {
+      setActiveTabId(TODAY_SENTINEL);
+    } else {
+      setTabs((prev) => [...prev, TODAY_SENTINEL]);
+      setActiveTabId(TODAY_SENTINEL);
+    }
+  }, [tabs]);
+
+  const handleGoToFlashcards = useCallback(() => {
+    if (tabs.includes(FLASHCARD_SENTINEL)) {
+      setActiveTabId(FLASHCARD_SENTINEL);
+    } else {
+      setTabs((prev) => [...prev, FLASHCARD_SENTINEL]);
+      setActiveTabId(FLASHCARD_SENTINEL);
+    }
+  }, [tabs]);
+
+  const handleGoToTrash = useCallback(() => {
+    if (tabs.includes(TRASH_SENTINEL)) {
+      setActiveTabId(TRASH_SENTINEL);
+    } else {
+      setTabs((prev) => [...prev, TRASH_SENTINEL]);
+      setActiveTabId(TRASH_SENTINEL);
+    }
+  }, [tabs]);
+
+  // ─── Open a collection view (all notes of a type) ────────────────
+  const handleOpenCollection = useCallback((type: NoteType) => {
+    const id = `${COLLECTION_PREFIX}${type}`;
+    if (tabs.includes(id)) {
+      setActiveTabId(id);
+    } else {
+      setTabs((prev) => [...prev, id]);
+      setActiveTabId(id);
+    }
+  }, [tabs]);
+
+  // ─── Active note metadata ────────────────────────────────────────
+  const activeNoteMeta: FileMeta | undefined = useMemo(
+    () => (activeTabId ? files.find((f) => f.id === activeTabId) : undefined),
+    [activeTabId, files]
+  );
+
+  const isToday = activeTabId === TODAY_SENTINEL;
+  const isFlashcards = activeTabId === FLASHCARD_SENTINEL;
+  const isTrash = activeTabId === TRASH_SENTINEL;
+  const isCollection = activeTabId?.startsWith(COLLECTION_PREFIX) ?? false;
+  const collectionType = isCollection
+    ? (activeTabId!.slice(COLLECTION_PREFIX.length) as NoteType)
+    : null;
+  const isTask = activeNoteMeta?.type === 'task';
+  const isTopic = activeNoteMeta?.type === 'topic';
+
+  // ─── Determine sidebar visibility per module ────────────────────
   const showNoteSidebar = activeWorkspace === 'notes';
 
-  // ─── Render the active module content ───────────────────────────────────
+  // ─── Render the active module content ────────────────────────────
   const renderModuleContent = () => {
     switch (activeWorkspace) {
       case 'notes':
@@ -231,9 +312,64 @@ function AppContent() {
               onReorderTabs={reorderTabs}
               notes={files}
             />
-            <Editor
-              activeNoteId={activeTabId}
-            />
+
+            <div className="flex flex-1 overflow-hidden">
+              {/* Main editor / today area */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {isToday ? (
+                  <ErrorBoundary fallbackTitle="Today page crashed">
+                    <TodayPage onOpenNote={(id) => openTab(id, true)} />
+                  </ErrorBoundary>
+                ) : isFlashcards ? (
+                  <ErrorBoundary fallbackTitle="Flashcards crashed">
+                    <FlashcardView onOpenNote={(id) => openTab(id, true)} />
+                  </ErrorBoundary>
+                ) : isTrash ? (
+                  <ErrorBoundary fallbackTitle="Trash view crashed">
+                    <TrashView onOpenNote={(id) => openTab(id, true)} />
+                  </ErrorBoundary>
+                ) : isCollection && collectionType ? (
+                  <ErrorBoundary fallbackTitle="Collection view crashed">
+                    <CollectionView
+                      type={collectionType}
+                      onOpenNote={(id) => openTab(id, true)}
+                      onNewNote={handleNewNoteWithType}
+                    />
+                  </ErrorBoundary>
+                ) : (
+                  <>
+                    {/* Inline property pills under title */}
+                    {activeNoteMeta && !isToday && !isFlashcards && (
+                      <div className="px-12 pt-0 pb-1 shrink-0">
+                        <PropertyPills
+                          meta={activeNoteMeta}
+                          onClick={() => setPropertiesPanelOpen(true)}
+                        />
+                      </div>
+                    )}
+                    <ErrorBoundary fallbackTitle="Editor crashed">
+                      <Editor activeNoteId={activeTabId} />
+                    </ErrorBoundary>
+                    {/* Topic auto-query section at bottom */}
+                    {isTopic && activeNoteMeta && (
+                      <TopicQuery
+                        topicTitle={activeNoteMeta.title}
+                        onOpenNote={(id) => openTab(id, true)}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Properties panel on right */}
+              {activeNoteMeta && propertiesPanelOpen && activeTabId && !isToday && !isFlashcards && (
+                <PropertiesPanel
+                  noteId={activeTabId}
+                  meta={activeNoteMeta}
+                  onClose={() => setPropertiesPanelOpen(false)}
+                />
+              )}
+            </div>
           </div>
         );
       case 'messages':
@@ -253,8 +389,13 @@ function AppContent() {
     }
   };
 
+  // Re-open properties panel when switching to a task note
+  useEffect(() => {
+    if (isTask) setPropertiesPanelOpen(true);
+  }, [activeTabId, isTask]);
+
   return (
-    <div className="flex flex-col h-screen w-screen bg-zinc-950 overflow-hidden select-none rounded-lg relative">
+    <div className="flex flex-col h-screen w-screen app-bg overflow-hidden select-none rounded-lg relative">
       <Titlebar
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -264,18 +405,25 @@ function AppContent() {
         {/* Notes sidebar — only shown for notes workspace */}
         {showNoteSidebar && (
           <div
-            className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0' : 'w-64'}`}
+            className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0' : 'w-55'}`}
           >
-            <Sidebar
-              onSelectNote={openTab}
-              activeNoteId={activeTabId}
-              notes={files}
-              openTabs={tabs}
-              onDeleteNote={handleDeleteNote}
-              onOpenSearch={() => setSearchOpen(true)}
-              onLockNote={handleLockNote}
-              onOpenAuth={() => toggleSettings(true)}
-            />
+            <ErrorBoundary fallbackTitle="Sidebar crashed">
+              <Sidebar
+                onSelectNote={openTab}
+                activeNoteId={activeTabId}
+                notes={files}
+                openTabs={tabs}
+                onDeleteNote={handleDeleteNote}
+                onOpenSearch={() => setSearchOpen(true)}
+                onLockNote={handleLockNote}
+                onOpenAuth={() => toggleSettings(true)}
+                onNewNote={() => setTypePickerOpen(true)}
+                onGoToToday={handleGoToToday}
+                onGoToFlashcards={handleGoToFlashcards}
+                onOpenCollection={handleOpenCollection}
+                onGoToTrash={handleGoToTrash}
+              />
+            </ErrorBoundary>
           </div>
         )}
 
@@ -302,7 +450,16 @@ function AppContent() {
         onClose={() => setAuthOpen(false)}
       />
 
+      <NoteTypePicker
+        isOpen={typePickerOpen}
+        onClose={() => setTypePickerOpen(false)}
+        onSelect={handleNewNoteWithType}
+      />
 
+      {/* Onboarding overlay — first launch only */}
+      {showOnboarding && (
+        <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+      )}
     </div>
   );
 }

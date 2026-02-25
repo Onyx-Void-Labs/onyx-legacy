@@ -1,5 +1,5 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { Minus, Square, X, PanelLeftClose, PanelLeft, PenLine, MessageCircle, CalendarDays, Mail, Image, Cloud, KeyRound, Settings, ChevronDown, Info, Maximize2, Minimize2 } from 'lucide-react';
+import { Minus, Square, X, PanelLeftClose, PanelLeft, PenLine, MessageCircle, CalendarDays, Mail, Image, Cloud, KeyRound, LayoutGrid, Settings, ChevronDown, Info, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useWorkspace, MODULE_ORDER, MODULES, type WorkspaceModule } from '../../contexts/WorkspaceContext';
 import { useSettings } from '../../contexts/SettingsContext';
@@ -13,52 +13,6 @@ const MODULE_ICONS: Record<WorkspaceModule, React.ComponentType<{ size?: number;
     photos: Image,
     passwords: KeyRound,
     cloud: Cloud,
-};
-
-// Accent color mappings
-const ACCENT_CLASSES: Record<string, { active: string; indicator: string; text: string; hover: string }> = {
-    purple: {
-        active: 'bg-purple-500/15 text-purple-300',
-        indicator: 'bg-gradient-to-r from-purple-500/50 via-purple-400 to-purple-500/50',
-        text: 'text-purple-400',
-        hover: 'hover:bg-purple-500/8 hover:text-purple-300',
-    },
-    blue: {
-        active: 'bg-blue-500/15 text-blue-300',
-        indicator: 'bg-gradient-to-r from-blue-500/50 via-blue-400 to-blue-500/50',
-        text: 'text-blue-400',
-        hover: 'hover:bg-blue-500/8 hover:text-blue-300',
-    },
-    emerald: {
-        active: 'bg-emerald-500/15 text-emerald-300',
-        indicator: 'bg-gradient-to-r from-emerald-500/50 via-emerald-400 to-emerald-500/50',
-        text: 'text-emerald-400',
-        hover: 'hover:bg-emerald-500/8 hover:text-emerald-300',
-    },
-    amber: {
-        active: 'bg-amber-500/15 text-amber-300',
-        indicator: 'bg-gradient-to-r from-amber-500/50 via-amber-400 to-amber-500/50',
-        text: 'text-amber-400',
-        hover: 'hover:bg-amber-500/8 hover:text-amber-300',
-    },
-    rose: {
-        active: 'bg-rose-500/15 text-rose-300',
-        indicator: 'bg-gradient-to-r from-rose-500/50 via-pink-400 to-rose-500/50',
-        text: 'text-rose-400',
-        hover: 'hover:bg-rose-500/8 hover:text-rose-300',
-    },
-    indigo: {
-        active: 'bg-indigo-500/15 text-indigo-300',
-        indicator: 'bg-gradient-to-r from-indigo-500/50 via-indigo-400 to-indigo-500/50',
-        text: 'text-indigo-400',
-        hover: 'hover:bg-indigo-500/8 hover:text-indigo-300',
-    },
-    sky: {
-        active: 'bg-sky-500/15 text-sky-300',
-        indicator: 'bg-gradient-to-r from-sky-500/50 via-sky-400 to-sky-500/50',
-        text: 'text-sky-400',
-        hover: 'hover:bg-sky-500/8 hover:text-sky-300',
-    },
 };
 
 interface TitlebarProps {
@@ -77,87 +31,143 @@ export default function Titlebar({ sidebarCollapsed, onToggleSidebar }: Titlebar
             // @ts-ignore
             appWindow = getCurrentWindow();
         } catch {
-            // Silent catch - avoiding console spam in browser mode
+            // Silent catch
         }
     }
     const { activeWorkspace, setActiveWorkspace, enabledModules } = useWorkspace();
     const { toggleSettings } = useSettings();
-    const activeConfig = MODULES[activeWorkspace];
 
     const [menuOpen, setMenuOpen] = useState(false);
+    const [switcherOpen, setSwitcherOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
+    const switcherRef = useRef<HTMLDivElement>(null);
+
+    // Zoom State
+    const [zoomLevel, setZoomLevel] = useState(() => {
+        const saved = localStorage.getItem('onyx-zoom');
+        return saved ? parseFloat(saved) : 1;
+    });
+
+    const handleZoom = (delta: number, reset = false) => {
+        setZoomLevel((prev) => {
+            let next = reset ? 1 : prev + delta;
+            next = Math.min(Math.max(next, 0.5), 2);
+            localStorage.setItem('onyx-zoom', next.toString());
+            document.documentElement.style.setProperty('--app-zoom', next.toString());
+            document.documentElement.style.fontSize = `${next * 16}px`;
+            return next;
+        });
+    };
+
+    useEffect(() => {
+        document.documentElement.style.setProperty('--app-zoom', zoomLevel.toString());
+        document.documentElement.style.fontSize = `${zoomLevel * 16}px`;
+    }, []);
+
+    useEffect(() => {
+        const handleWheel = (e: WheelEvent) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                handleZoom(e.deltaY > 0 ? -0.1 : 0.1);
+            }
+        };
+        const handleKey = (e: KeyboardEvent) => {
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === '=' || e.key === '+') { e.preventDefault(); handleZoom(0.1); }
+                else if (e.key === '-') { e.preventDefault(); handleZoom(-0.1); }
+                else if (e.key === '0') { e.preventDefault(); handleZoom(0, true); }
+            }
+            // Ctrl+Shift+M toggles app switcher
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'M') {
+                e.preventDefault();
+                setSwitcherOpen(prev => !prev);
+            }
+        };
+        window.addEventListener('wheel', handleWheel, { passive: false });
+        window.addEventListener('keydown', handleKey);
+        return () => {
+            window.removeEventListener('wheel', handleWheel);
+            window.removeEventListener('keydown', handleKey);
+        };
+    }, []);
 
     const handleMinimize = () => appWindow?.minimize();
     const handleMaximize = () => appWindow?.toggleMaximize();
     const handleClose = () => appWindow?.close();
 
-    // Close menu on outside click
+    // Close ONYX menu on outside click
     useEffect(() => {
         if (!menuOpen) return;
         const handleClick = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                setMenuOpen(false);
-            }
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
         };
         window.addEventListener('mousedown', handleClick);
         return () => window.removeEventListener('mousedown', handleClick);
     }, [menuOpen]);
 
-    // Close menu on Escape
+    // Close app switcher on outside click / Escape
+    useEffect(() => {
+        if (!switcherOpen) return;
+        const handleClick = (e: MouseEvent) => {
+            if (switcherRef.current && !switcherRef.current.contains(e.target as Node)) setSwitcherOpen(false);
+        };
+        const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSwitcherOpen(false); };
+        window.addEventListener('mousedown', handleClick);
+        window.addEventListener('keydown', handleKey);
+        return () => { window.removeEventListener('mousedown', handleClick); window.removeEventListener('keydown', handleKey); };
+    }, [switcherOpen]);
+
     useEffect(() => {
         if (!menuOpen) return;
-        const handleKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') setMenuOpen(false);
-        };
+        const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
         window.addEventListener('keydown', handleKey);
         return () => window.removeEventListener('keydown', handleKey);
     }, [menuOpen]);
 
-    const visibleModules = MODULE_ORDER.filter(m => enabledModules.includes(m));
-    const accent = ACCENT_CLASSES[activeConfig.accentColor];
+    const visibleModules = MODULE_ORDER.filter((m) => enabledModules.includes(m));
+    const activeConfig = MODULES[activeWorkspace];
+    const ActiveIcon = MODULE_ICONS[activeWorkspace];
 
     return (
         <header
-            className="h-11 bg-zinc-900/80 backdrop-blur-md flex items-center justify-between select-none shrink-0 border-b border-zinc-800/50 z-50 relative"
+            className="h-11 bg-zinc-950/90 backdrop-blur-md flex items-center justify-between select-none shrink-0 border-b border-zinc-800/40 z-50 relative"
             data-tauri-drag-region
             onDoubleClick={(e) => {
-                // Only maximize if clicking the drag region itself (not buttons)
-                if ((e.target as HTMLElement).dataset.tauriDragRegion !== undefined) {
-                    handleMaximize();
-                }
+                if ((e.target as HTMLElement).dataset.tauriDragRegion !== undefined) handleMaximize();
             }}
         >
-            {/* LEFT: Sidebar Toggle + ONYX Menu */}
-            <div className="flex items-center gap-1 px-3 min-w-[180px]">
+            {/* LEFT: Sidebar Toggle + ONYX Branding */}
+            <div className="flex items-center gap-1 px-2 min-w-48 h-full">
                 <button
                     onClick={onToggleSidebar}
                     className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
-                    title={sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+                    title={sidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'}
                 >
                     {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
                 </button>
 
-                {/* ONYX clickable menu - HIDDEN IN DEMO MODE */}
+                {/* ONYX branding + menu */}
                 {!import.meta.env.VITE_DEMO_MODE && (
                     <div className="relative" ref={menuRef}>
                         <button
                             onClick={() => setMenuOpen(!menuOpen)}
-                            className={`flex items-center gap-1 ml-1 px-2 py-1 rounded-lg transition-all duration-150 ${menuOpen
-                                ? 'bg-zinc-800 shadow-sm'
-                                : 'hover:bg-zinc-800/60'
-                                }`}
+                            className={`flex items-center gap-1.5 ml-1 px-2 py-1 rounded-lg transition-all duration-150 ${
+                                menuOpen ? 'bg-zinc-800 shadow-sm' : 'hover:bg-zinc-800/60'
+                            }`}
                         >
-                            <span className="text-zinc-100 font-black tracking-widest text-sm">ONYX</span>
-                            <span className={`font-bold text-sm transition-colors duration-300 ${accent?.text || 'text-purple-400'}`}>
-                                {activeConfig.label.toLowerCase()}
+                            <span className="text-zinc-100 font-extrabold tracking-widest text-[11px]">
+                                ONYX<span className="text-purple-400">.</span>
                             </span>
-                            <ChevronDown size={12} className={`text-zinc-500 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
+                            <ChevronDown
+                                size={11}
+                                className={`text-zinc-500 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`}
+                            />
                         </button>
 
-                        {/* Dropdown Menu */}
                         {menuOpen && (
-                            <div className="absolute top-full left-0 mt-1 w-56 bg-zinc-900 border border-zinc-800/80 rounded-xl shadow-2xl shadow-black/50 overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-1 duration-150">
-                                {/* Settings */}
+                            <div className="absolute top-full left-0 mt-1 w-56 bg-zinc-900 border border-zinc-800/80 rounded-xl shadow-2xl shadow-black/50 overflow-hidden z-9999"
+                                style={{ animation: 'fadeIn 0.15s ease-out' }}
+                            >
                                 <div className="p-1.5 border-b border-zinc-800/50">
                                     <button
                                         onClick={() => { toggleSettings(true); setMenuOpen(false); }}
@@ -168,26 +178,29 @@ export default function Titlebar({ sidebarCollapsed, onToggleSidebar }: Titlebar
                                         <span className="ml-auto text-[10px] text-zinc-600 font-medium">Ctrl+,</span>
                                     </button>
                                 </div>
-
-                                {/* Window controls */}
                                 <div className="p-1.5 border-b border-zinc-800/50">
-                                    <button
-                                        onClick={() => { handleMaximize(); setMenuOpen(false); }}
-                                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800/70 transition-colors"
-                                    >
-                                        <Maximize2 size={15} className="text-zinc-500" />
-                                        <span>Maximize</span>
+                                    <div className="flex items-center justify-between px-3 py-1.5 mb-1">
+                                        <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Zoom</span>
+                                        <span className="text-[10px] text-zinc-400 font-mono bg-zinc-800/50 px-1.5 py-0.5 rounded">
+                                            {Math.round(zoomLevel * 100)}%
+                                        </span>
+                                    </div>
+                                    <button onClick={() => handleZoom(0.1)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800/70 transition-colors">
+                                        <ZoomIn size={15} className="text-zinc-500" />
+                                        <span>Zoom In</span>
+                                        <span className="ml-auto text-[10px] text-zinc-600 font-medium">Ctrl++</span>
                                     </button>
-                                    <button
-                                        onClick={() => { handleMinimize(); setMenuOpen(false); }}
-                                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800/70 transition-colors"
-                                    >
-                                        <Minimize2 size={15} className="text-zinc-500" />
-                                        <span>Minimize</span>
+                                    <button onClick={() => handleZoom(-0.1)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800/70 transition-colors">
+                                        <ZoomOut size={15} className="text-zinc-500" />
+                                        <span>Zoom Out</span>
+                                        <span className="ml-auto text-[10px] text-zinc-600 font-medium">Ctrl+-</span>
+                                    </button>
+                                    <button onClick={() => handleZoom(0, true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800/70 transition-colors">
+                                        <RotateCcw size={15} className="text-zinc-500" />
+                                        <span>Reset</span>
+                                        <span className="ml-auto text-[10px] text-zinc-600 font-medium">Ctrl+0</span>
                                     </button>
                                 </div>
-
-                                {/* About */}
                                 <div className="p-1.5">
                                     <button
                                         onClick={() => { toggleSettings(true); setMenuOpen(false); }}
@@ -203,63 +216,91 @@ export default function Titlebar({ sidebarCollapsed, onToggleSidebar }: Titlebar
                 )}
             </div>
 
-            {/* CENTER: Workspace Tabs */}
-            <div className="flex items-center gap-1 flex-1 justify-center">
-                {visibleModules
-                    .filter(m => !(import.meta.env.VITE_DEMO_MODE && m === 'photos'))
-                    .map(moduleId => {
-                        const config = MODULES[moduleId];
-                        const isActive = activeWorkspace === moduleId;
-                        const Icon = MODULE_ICONS[moduleId];
-                        const modAccent = ACCENT_CLASSES[config.accentColor];
-
-                        return (
-                            <button
-                                key={moduleId}
-                                onClick={() => setActiveWorkspace(moduleId)}
-                                className={`
-                                relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold
-                                transition-all duration-200 ease-out
-                                ${isActive
-                                        ? `${modAccent.active}`
-                                        : `text-zinc-500 ${modAccent.hover}`
-                                    }
-                            `}
-                                title={config.label}
-                            >
-                                {isActive && (
-                                    <div className={`absolute bottom-0 left-2 right-2 h-[2px] ${modAccent.indicator} rounded-full`} />
-                                )}
-                                <Icon size={14} className={isActive ? modAccent.text : ''} />
-                                <span className="tracking-tight hidden sm:inline">{config.label}</span>
-                            </button>
-                        );
-                    })}
+            {/* CENTER: Active module name — focused mode */}
+            <div className="flex items-center h-full flex-1 justify-center gap-2" data-tauri-drag-region>
+                <div className="flex items-center gap-2 text-zinc-400">
+                    <ActiveIcon size={14} className="text-purple-400" />
+                    <span className="text-[12px] font-semibold tracking-wide text-zinc-300">
+                        ONYX<span className="text-purple-400">.</span> {activeConfig.label}
+                    </span>
+                </div>
             </div>
 
-            {/* RIGHT: Window Controls only — clean, hidden in demo mode */}
-            {!import.meta.env.VITE_DEMO_MODE && (
-                <div className="flex items-center h-full min-w-[180px] justify-end">
+            {/* RIGHT: App Switcher + Window Controls */}
+            <div className="flex items-center h-full min-w-48 justify-end" data-tauri-drag-region>
+                {/* App switcher grid icon */}
+                <div className="relative" ref={switcherRef}>
                     <button
-                        onClick={handleMinimize}
-                        className="h-full w-12 flex items-center justify-center hover:bg-zinc-700/60 text-zinc-400 hover:text-zinc-100 transition-colors"
+                        onClick={() => setSwitcherOpen(!switcherOpen)}
+                        className={`p-1.5 rounded-md transition-all duration-150 mr-1 ${
+                            switcherOpen
+                                ? 'bg-purple-500/15 text-purple-300'
+                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                        }`}
+                        title="App Switcher (Ctrl+Shift+M)"
                     >
-                        <Minus size={14} />
+                        <LayoutGrid size={16} />
                     </button>
-                    <button
-                        onClick={handleMaximize}
-                        className="h-full w-12 flex items-center justify-center hover:bg-zinc-700/60 text-zinc-400 hover:text-zinc-100 transition-colors"
-                    >
-                        <Square size={12} />
-                    </button>
-                    <button
-                        onClick={handleClose}
-                        className="h-full w-12 flex items-center justify-center hover:bg-red-500 text-zinc-400 hover:text-white transition-colors"
-                    >
-                        <X size={16} />
-                    </button>
+
+                    {/* App Switcher Popover */}
+                    {switcherOpen && (
+                        <div
+                            className="absolute top-full right-0 mt-1.5 w-64 bg-zinc-900 border border-zinc-800/80 rounded-xl shadow-2xl shadow-black/50 overflow-hidden z-9999 origin-top-right"
+                            style={{ animation: 'fadeIn 0.15s ease-out' }}
+                        >
+                            <div className="p-2">
+                                <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider px-2 py-1.5">
+                                    Modules
+                                </div>
+                                <div className="grid grid-cols-3 gap-1 mt-1">
+                                    {visibleModules
+                                        .filter((m) => !(import.meta.env.VITE_DEMO_MODE && m === 'photos'))
+                                        .map((moduleId) => {
+                                            const config = MODULES[moduleId];
+                                            const isActive = activeWorkspace === moduleId;
+                                            const Icon = MODULE_ICONS[moduleId];
+
+                                            return (
+                                                <button
+                                                    key={moduleId}
+                                                    onClick={() => {
+                                                        setActiveWorkspace(moduleId);
+                                                        setSwitcherOpen(false);
+                                                    }}
+                                                    className={`
+                                                        flex flex-col items-center gap-1.5 p-3 rounded-lg transition-all duration-150
+                                                        ${isActive
+                                                            ? 'bg-purple-500/15 text-purple-300 shadow-sm shadow-purple-500/10'
+                                                            : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60'
+                                                        }
+                                                    `}
+                                                >
+                                                    <Icon size={20} className={isActive ? 'text-purple-400' : ''} />
+                                                    <span className="text-[10px] font-medium">{config.label}</span>
+                                                </button>
+                                            );
+                                        })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            )}
+
+                {/* Window Controls — hidden in demo mode */}
+                {!import.meta.env.VITE_DEMO_MODE && (
+                    <>
+                        <button onClick={handleMinimize} className="h-full w-11 flex items-center justify-center hover:bg-zinc-800 text-zinc-500 hover:text-zinc-200 transition-colors">
+                            <Minus size={14} />
+                        </button>
+                        <button onClick={handleMaximize} className="h-full w-11 flex items-center justify-center hover:bg-zinc-800 text-zinc-500 hover:text-zinc-200 transition-colors">
+                            <Square size={11} />
+                        </button>
+                        <button onClick={handleClose} className="h-full w-11 flex items-center justify-center hover:bg-red-500 text-zinc-500 hover:text-white transition-colors">
+                            <X size={15} />
+                        </button>
+                    </>
+                )}
+            </div>
         </header>
     );
 }

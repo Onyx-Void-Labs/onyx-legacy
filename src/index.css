@@ -1,15 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-sans: 'DM Sans', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --onyx-bg: #111114;
+  --onyx-sidebar: #141417;
+  --onyx-editor: #16161a;
+  --onyx-card: #1c1c21;
+  --onyx-accent: #7c6ef7;
+  --onyx-accent-soft: rgba(124, 110, 247, 0.12);
 }
 
 body {
   font-family: var(--font-sans);
-  background-color: #000;
-  color: #fff;
+  background-color: var(--onyx-bg);
+  color: #f4f4f5;
   overflow: hidden;
+  font-size: 15px;
+  line-height: 1.8;
   /* Prevent body scroll, use containers */
 }
 
@@ -104,19 +112,60 @@ body {
 
 /* --- UTILITIES --- */
 .glass {
-  background: rgba(24, 24, 27, 0.6);
-  /* zinc-900/60 */
+  background: rgba(22, 22, 26, 0.75);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .glass-panel {
-  background: linear-gradient(145deg, rgba(24, 24, 27, 0.9), rgba(9, 9, 11, 0.9));
-  border: 1px solid rgba(255, 255, 255, 0.03);
-  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(145deg, rgba(28, 28, 33, 0.95), rgba(22, 22, 26, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.35);
 }
 
 .backface-hidden {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+}
+
+/* --- FADE-IN ANIMATION FOR NEW COMPONENTS --- */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.2s ease-out;
+}
+
+/* --- FLASHCARD FLIP --- */
+@keyframes cardReveal {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-card-reveal {
+  animation: cardReveal 0.15s ease-out;
+}
+
+/* --- APP BACKGROUND GRADIENT (subtle warm glow) --- */
+.app-bg {
+  background: radial-gradient(
+    ellipse at 50% -10%,
+    rgba(124, 110, 247, 0.03) 0%,
+    transparent 60%
+  ),
+  var(--onyx-bg);
 }

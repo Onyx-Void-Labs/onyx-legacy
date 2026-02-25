@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export type FontFamily = 'Inter' | 'JetBrains Mono' | 'Georgia' | 'System' | 'Slab' | 'Playfair' | 'Outfit' | 'Montserrat';
+export type FontFamily = 'DM Sans' | 'Inter' | 'JetBrains Mono' | 'Georgia' | 'System' | 'Slab' | 'Playfair' | 'Outfit' | 'Montserrat';
 export type AccentColor = 'purple' | 'emerald' | 'blue' | 'amber' | 'rose' | 'zinc' | 'crimson' | 'ocean';
 export type CursorStyle = 'smooth' | 'solid' | 'blink' | 'none' | 'block' | 'underline';
 export type ThemeVariant = 'dark' | 'light' | 'system' | 'midnight' | 'oled';
@@ -176,10 +176,10 @@ const SettingsContext = createContext<SettingsContextType | undefined>(undefined
 const STORAGE_KEY = 'onyx-settings-v3';
 
 export const DEFAULT_SETTINGS: SettingsState = {
-    fontFamily: 'Inter',
-    uiFontFamily: 'Inter',
-    editorFontFamily: 'Inter',
-    sidebarFontFamily: 'Inter',
+    fontFamily: 'DM Sans',
+    uiFontFamily: 'DM Sans',
+    editorFontFamily: 'DM Sans',
+    sidebarFontFamily: 'DM Sans',
     codeFontFamily: 'JetBrains Mono',
 
     fontSize: 16,

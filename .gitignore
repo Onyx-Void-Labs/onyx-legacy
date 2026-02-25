@@ -1,38 +1,55 @@
-# Logs
-logs
+# ── Dependencies ────────────────────────────────
+node_modules/
+
+# ── Build Outputs ───────────────────────────────
+dist/
+dist-ssr/
+target/
+server/target/
+src-tauri/target/
+src-tauri/gen/
+
+# ── Environment Secrets ─────────────────────────
+.env
+.env.*
+!.env.example
+infrastructure/**/.env
+
+# ── Tauri ───────────────────────────────────────
+*.local
+
+# ── Infrastructure / Deploy Secrets ─────────────
+deploy/*.pem
+deploy/*.key
+infrastructure/deploy/*.pem
+infrastructure/deploy/*.key
+deploy/pb_data
+deploy/hp_data
+deploy/caddy_data
+deploy/caddy_config
+
+# ── One-off Scripts / Dev Dumps ─────────────────
+update_auth_render.cjs
+*.tmp
+
+# ── Logs ────────────────────────────────────────
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-target/
-dist
-dist-ssr
-*.local
-.env
-.env.*
-!.env.example
-
-# Editor directories and files
+# ── Editor ──────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-
-# Production Data (Do NOT commit)
-deploy/pb_data
-deploy/hp_data
-deploy/caddy_data
-deploy/caddy_config
-
-# AI Context
-AI_CHEATSHEET.md
+# ── OS ──────────────────────────────────────────
+.DS_Store
+Thumbs.db

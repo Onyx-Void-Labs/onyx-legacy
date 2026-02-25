@@ -38,37 +38,43 @@ const SAMPLE_EMAILS = [
     },
 ];
 
-export default function EmailView() {
+interface EmailViewProps {
+    sidebarCollapsed?: boolean;
+}
+
+export default function EmailView({ sidebarCollapsed = false }: EmailViewProps) {
     return (
         <div className="flex h-full overflow-hidden">
             {/* Folder Sidebar */}
-            <div className="w-56 bg-zinc-900/60 flex flex-col border-r border-zinc-800/30 shrink-0">
-                <div className="p-3 shrink-0">
-                    <button className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/15 text-amber-400 hover:bg-amber-500/20 transition-colors text-sm font-semibold">
-                        <MailPlus size={16} />
-                        Compose
-                    </button>
-                </div>
+            <div className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0 opacity-0 border-none' : 'w-56 opacity-100 border-r border-zinc-800/30'}`}>
+                <div className="w-56 h-full flex flex-col bg-zinc-900/60">
+                    <div className="p-3 shrink-0">
+                        <button className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/15 text-amber-400 hover:bg-amber-500/20 transition-colors text-sm font-semibold">
+                            <MailPlus size={16} />
+                            Compose
+                        </button>
+                    </div>
 
-                <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
-                    {FOLDERS.map(folder => (
-                        <button
-                            key={folder.label}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${folder.active
+                    <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+                        {FOLDERS.map(folder => (
+                            <button
+                                key={folder.label}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${folder.active
                                     ? 'bg-zinc-800/60 text-zinc-100'
                                     : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
-                                }`}
-                        >
-                            <folder.icon size={16} className={folder.active ? 'text-amber-400' : 'text-zinc-600'} />
-                            <span className="flex-1 text-left truncate">{folder.label}</span>
-                            {folder.count > 0 && (
-                                <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${folder.active ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-600'
-                                    }`}>
-                                    {folder.count}
-                                </span>
-                            )}
-                        </button>
-                    ))}
+                                    }`}
+                            >
+                                <folder.icon size={16} className={folder.active ? 'text-amber-400' : 'text-zinc-600'} />
+                                <span className="flex-1 text-left truncate">{folder.label}</span>
+                                {folder.count > 0 && (
+                                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${folder.active ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-600'
+                                        }`}>
+                                        {folder.count}
+                                    </span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -93,8 +99,8 @@ export default function EmailView() {
                         <div
                             key={i}
                             className={`px-4 py-3 border-b border-zinc-800/20 cursor-pointer transition-colors ${i === 0
-                                    ? 'bg-amber-500/5 border-l-2 border-l-amber-400'
-                                    : 'hover:bg-zinc-800/20 border-l-2 border-l-transparent'
+                                ? 'bg-amber-500/5 border-l-2 border-l-amber-400'
+                                : 'hover:bg-zinc-800/20 border-l-2 border-l-transparent'
                                 }`}
                         >
                             <div className="flex items-center justify-between mb-0.5">

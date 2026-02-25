@@ -10,49 +10,55 @@ const SAMPLE_ALBUMS = [
     { name: 'Downloads', count: 0, icon: FolderOpen },
 ];
 
-export default function PhotosView() {
+interface PhotosViewProps {
+    sidebarCollapsed?: boolean;
+}
+
+export default function PhotosView({ sidebarCollapsed = false }: PhotosViewProps) {
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
     return (
         <div className="flex h-full overflow-hidden">
             {/* Albums Sidebar */}
-            <div className="w-56 bg-zinc-900/60 flex flex-col border-r border-zinc-800/30 shrink-0">
-                <div className="h-12 px-4 flex items-center gap-2 border-b border-zinc-800/30 shrink-0">
-                    <Image size={16} className="text-rose-400" />
-                    <span className="text-sm font-semibold text-zinc-200">Albums</span>
-                </div>
+            <div className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0 opacity-0 border-none' : 'w-56 opacity-100 border-r border-zinc-800/30'}`}>
+                <div className="w-56 h-full flex flex-col bg-zinc-900/60">
+                    <div className="h-12 px-4 flex items-center gap-2 border-b border-zinc-800/30 shrink-0">
+                        <Image size={16} className="text-rose-400" />
+                        <span className="text-sm font-semibold text-zinc-200">Albums</span>
+                    </div>
 
-                <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-                    {SAMPLE_ALBUMS.map((album, i) => (
-                        <button
-                            key={album.name}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${i === 0
+                    <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                        {SAMPLE_ALBUMS.map((album, i) => (
+                            <button
+                                key={album.name}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${i === 0
                                     ? 'bg-zinc-800/60 text-zinc-100'
                                     : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
-                                }`}
-                        >
-                            <album.icon size={16} className={i === 0 ? 'text-rose-400' : 'text-zinc-600'} />
-                            <span className="flex-1 text-left truncate">{album.name}</span>
-                            <span className="text-xs text-zinc-600">{album.count}</span>
-                        </button>
-                    ))}
+                                    }`}
+                            >
+                                <album.icon size={16} className={i === 0 ? 'text-rose-400' : 'text-zinc-600'} />
+                                <span className="flex-1 text-left truncate">{album.name}</span>
+                                <span className="text-xs text-zinc-600">{album.count}</span>
+                            </button>
+                        ))}
 
-                    <div className="pt-2">
-                        <button className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-500 hover:text-rose-400 hover:bg-rose-500/8 border border-dashed border-zinc-800 hover:border-rose-500/30 transition-all">
-                            <FolderOpen size={14} />
-                            <span>New Album</span>
-                        </button>
+                        <div className="pt-2">
+                            <button className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-500 hover:text-rose-400 hover:bg-rose-500/8 border border-dashed border-zinc-800 hover:border-rose-500/30 transition-all">
+                                <FolderOpen size={14} />
+                                <span>New Album</span>
+                            </button>
+                        </div>
                     </div>
-                </div>
 
-                {/* Storage info */}
-                <div className="border-t border-zinc-800/30 p-4 shrink-0 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-500">Storage Used</span>
-                        <span className="text-zinc-400">0 / 200 GB</span>
-                    </div>
-                    <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                        <div className="h-full w-0 bg-gradient-to-r from-rose-500 to-pink-500 rounded-full" />
+                    {/* Storage info */}
+                    <div className="border-t border-zinc-800/30 p-4 shrink-0 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-zinc-500">Storage Used</span>
+                            <span className="text-zinc-400">0 / 200 GB</span>
+                        </div>
+                        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div className="h-full w-0 bg-linear-to-r from-rose-500 to-pink-500 rounded-full" />
+                        </div>
                     </div>
                 </div>
             </div>

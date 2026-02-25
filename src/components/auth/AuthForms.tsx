@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { openPath } from '@tauri-apps/plugin-opener'; // Using openPath as generic opener
 import { pb } from '../../lib/pocketbase'
 import { MasterKeyService, encryptData, hashIdentity, encryptFile } from '../../services/SecurityService'
 import { EmailAuthService } from '../../services/EmailAuthService'
@@ -8,7 +7,9 @@ import { PasskeyService } from '../../services/PasskeyService'
 import * as OTPAuth from 'otpauth';
 import QRCodeStyling from 'qr-code-styling';
 import * as bip39 from 'bip39';
-import { Loader2, ShieldCheck, AlertTriangle, ChevronRight, Check, ArrowLeft, Fingerprint, Mail, Lock, RefreshCw, Eye, EyeOff, Copy, QrCode, ArrowRight, KeyRound, Shield, Key, X } from 'lucide-react'
+import {
+    Loader2, ShieldCheck, ChevronRight, Check, ArrowLeft, Fingerprint, Lock, Mail, RefreshCw, Shield, Copy, Eye, EyeOff, QrCode, ArrowRight, X
+} from 'lucide-react';
 
 
 
@@ -37,18 +38,18 @@ const AuthHeader = ({ title, icon: Icon, subtitle, className }: { title: string,
                 75% { transform: rotate(10deg) scale(1.1); }
             }
         `}</style>
-            <div className="w-24 h-24 bg-gradient-to-tr from-purple-500/10 to-blue-500/10 rounded-3xl flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(168,85,247,0.1)] border border-white/5 relative group overflow-hidden pointer-events-auto">
-                <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/20 via-transparent to-blue-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+            <div className="w-24 h-24 bg-linear-to-tr from-purple-500/10 to-blue-500/10 rounded-3xl flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(168,85,247,0.1)] border border-white/5 relative group overflow-hidden pointer-events-auto">
+                <div className="absolute inset-0 bg-linear-to-tr from-purple-500/20 via-transparent to-blue-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
 
                 {/* Animated Rings */}
-                <div className="absolute inset-0 border border-purple-500/20 rounded-3xl scale-75 opacity-0 group-hover:scale-107 group-hover:opacity-100 transition-all duration-[2500ms] delay-100" />
-                <div className="absolute inset-0 border border-blue-500/20 rounded-3xl scale-50 opacity-0 group-hover:scale-125 group-hover:opacity-100 transition-all duration-[2500ms] delay-200" />
+                <div className="absolute inset-0 border border-purple-500/20 rounded-3xl scale-75 opacity-0 group-hover:scale-107 group-hover:opacity-100 transition-all duration-2500 delay-100" />
+                <div className="absolute inset-0 border border-blue-500/20 rounded-3xl scale-50 opacity-0 group-hover:scale-125 group-hover:opacity-100 transition-all duration-2500 delay-200" />
 
                 <Icon size={40} className="text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] relative z-10 group-hover:scale-110 transition-transform duration-700" />
             </div>
             {
                 title && (
-                    <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-zinc-200 to-zinc-500 tracking-tight mb-2 leading-relaxed pb-1 whitespace-nowrap">
+                    <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-linear-to-br from-white via-zinc-200 to-zinc-500 tracking-tight mb-2 leading-relaxed pb-1 whitespace-nowrap">
                         {title}
                     </h2>
                 )
@@ -216,7 +217,7 @@ const UsernameGenerator = ({ initialBase, initialTag, onConfirm }: { initialBase
                         <button
                             type="submit"
                             disabled={!base || !tag}
-                            className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-4"
+                            className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-4"
                         >
                             Confirm Identity <ArrowRight size={18} />
                         </button>
@@ -236,7 +237,7 @@ interface AuthFormsProps {
     onCancel?: () => void;
 }
 
-type AuthMode = 'identity' | 'challenge_passkey' | 'challenge_password' | 'secure_account_choice' | 'signup_otp' | 'signup_username' | 'signup_recovery' | 'signup_security' | 'signup_2fa' | 'signup_profile' | 'recovery_input' | 'show_phrase' | 'magic_link_sent' | 'login_options';
+type AuthMode = 'identity' | 'challenge_passkey' | 'challenge_password' | 'secure_account_choice' | 'signup_otp' | 'signup_username' | 'signup_security' | 'signup_2fa' | 'signup_profile' | 'signup_waiting' | 'passkey_setup' | 'recovery_input' | 'show_phrase' | 'magic_link_sent' | 'login_options';
 type SignupMethod = 'passkey' | 'password';
 
 interface UserCheckResult {
@@ -305,6 +306,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
     const [loading, setLoading] = useState(false)
     const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null)
     const [resendCooldown, setResendCooldown] = useState(0)
+
     const [isResending, setIsResending] = useState(false)
     const [resendSuccess, setResendSuccess] = useState(false)
     const lastResendTime = useRef<number>(0)
@@ -336,6 +338,16 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
         lastResendTime.current = 0;
         setResendCooldown(0);
     }, [identifier]);
+
+    // Handle Passkey Signup Activation
+    useEffect(() => {
+        if (mode === 'passkey_setup') {
+            const timer = setTimeout(() => {
+                handleSignup(undefined, 'passkey');
+            }, 1500);
+            return () => clearTimeout(timer);
+        }
+    }, [mode]);
 
     // Handle File Selection
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -581,23 +593,25 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
         // Generate Recovery Phrase
         const mnemonic = bip39.generateMnemonic();
         setGeneratedPhrase(mnemonic);
-        setMode('signup_recovery');
-    };
-
-    const handleRecoveryConfirm = (e: React.FormEvent) => {
-        e.preventDefault();
         setMode('secure_account_choice');
     };
 
-    // State for private recovery email (for blind/OAuth users)
-    const [recoveryEmail, setRecoveryEmail] = useState('');
 
-    const handleSignup = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setMessage(null);
+
+    const handleSignup = async (e?: React.FormEvent, methodOverride?: SignupMethod) => {
+        if (e) e.preventDefault();
+
+        const effectiveMethod = methodOverride || signupMethod;
+
+        // If Passkey: Show waiting screen immediately
+        if (effectiveMethod === 'passkey') {
+            setMode('signup_waiting');
+        }
 
         try {
+            setLoading(true);
+            setMessage(null);
+
             const hwid = await DeviceService.getFingerprint();
             const isOAuthUser = pb.authStore.isValid && pb.authStore.model;
 
@@ -609,9 +623,8 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
             const suffix = customTag || Math.floor(1000 + Math.random() * 9000).toString();
             const finalUsername = `${baseName}${suffix}`;
 
-            // Check if we need to collect a real email (Blind Account)
-            const isBlind = isOAuthUser && (pb.authStore.model?.email?.includes('@blind.onyx') || !pb.authStore.model?.email);
-            const emailToEncrypt = isBlind ? recoveryEmail : identifier;
+            // Encryption Scope: Use identifier (already set as placeholder for passkey if needed)
+            const emailToEncrypt = identifier;
 
             // Fix 400 Error: Ensure we have an identifier for Passkey users who skipped email
             const effectiveIdentifier = identifier || `passkey_${finalUsername}@placeholder.onyx`;
@@ -620,9 +633,10 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
             const salt = MasterKeyService.generateSalt();
             const mnemonic = await MasterKeyService.generateRecoveryPhrase();
 
+            // effectiveMethod is already declared above, reusing it
             let finalPassword = password;
             // Only generate random password if using passkey AND not setting a password manually
-            if (signupMethod === 'passkey' && !password) {
+            if (effectiveMethod === 'passkey' && !password) {
                 const array = new Uint8Array(16);
                 crypto.getRandomValues(array);
                 finalPassword = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -658,7 +672,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                 }
             }
 
-            formData.append('name_ciphertext', nameEncrypted);
+            formData.append('name', nameEncrypted);
             formData.append('email_ciphertext', emailEncrypted);
             formData.append('hwid_ciphertext', hwidEncrypted);
             formData.append('enc_salt', salt);
@@ -666,14 +680,12 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
             formData.append('recovery_hash', recovery_hash);
             formData.append('email_opted_in', (emailToEncrypt) ? 'true' : 'false');
 
-            // Name/Avatar are blind in DB (Name ciphertext has real name)
-            if (!isOAuthUser) {
-                formData.append('name', '');
-            }
+            // Name/Avatar are blind in DB (Name is encrypted)
 
             // Avatar Handling
             if (!avatarFile) {
                 formData.append('avatar_ciphertext', '');
+                formData.append('avatar', ''); // Wipe plain avatar from OAuth
             } else {
                 try {
                     const encryptedAvatarFile = await encryptFile(avatarFile, mk);
@@ -684,33 +696,13 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                 }
             }
 
-            let userRecord;
             if (isOAuthUser) {
                 // UPDATE existing OAuth User
-                userRecord = await pb.collection('users').update(pb.authStore.model!.id, formData);
+                await pb.collection('users').update(pb.authStore.model!.id, formData);
             } else {
                 // CREATE User
-                userRecord = await pb.collection('users').create(formData);
+                await pb.collection('users').create(formData);
                 await pb.collection('users').authWithPassword(blindEmail || finalUsername, finalPassword);
-            }
-
-            // Register Passkey
-            if (signupMethod === 'passkey') {
-                try {
-                    const credential = await PasskeyService.register(finalUsername, userRecord.id);
-                    await pb.collection('passkeys').create({
-                        user: userRecord.id,
-                        credential_id: credential.id,
-                        public_key: credential.rawId,
-                        label_ciphertext: await encryptData("Primary Device", mk),
-                        counter: 0,
-                        transports: credential.response.transports || [],
-                        last_used: new Date()
-                    });
-                } catch (pkErr: any) {
-                    console.warn("Passkey reg skipped:", pkErr);
-                    setMessage({ type: 'error', text: "Passkey setup failed. Use Recovery Key." });
-                }
             }
 
             // Save MK
@@ -718,7 +710,13 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
             sessionStorage.setItem('onyx_mk', mk);
 
             setGeneratedPhrase(mnemonic);
-            setMode('show_phrase');
+
+            // Post-Signup Flow: Go to profile setup for passkey users, recovery phrase for others
+            if (effectiveMethod === 'passkey') {
+                setMode('signup_profile');
+            } else {
+                setMode('show_phrase');
+            }
 
         } catch (err: any) {
             console.error("Signup Error:", err);
@@ -732,26 +730,51 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
     const handlePasskeyLogin = async () => {
         setLoading(true);
         setMessage(null);
+        setMode('challenge_passkey'); // Switch to "Authenticating..." UI immediately
+        console.log("[Auth] Starting Passkey Login Flow...");
         try {
-            await PasskeyService.authenticate();
+            const credential = await PasskeyService.authenticate();
+            console.log("[Auth] Passkey authentication successful:", credential.id);
 
-            // 1. Check if we have a valid PB session
-            if (pb.authStore.isValid) {
-                const storedMk = localStorage.getItem('onyx_mk');
-                if (storedMk) {
-                    completeAuth(storedMk);
-                } else {
-                    // Session valid, but keys missing? (Rare, maybe cleared cache)
-                    setMode('recovery_input');
-                    setMessage({ type: 'success', text: "Identify confirmed. Enter Recovery Key to decrypt data." });
-                }
+            // In a full implementation, we would send 'credential' to a PB hook for verification
+            // and receive a login token. For now, we'll search for the user associated with this credential.
+
+            const passkeyRecord = await pb.collection('passkeys').getFirstListItem(`credential_id="${credential.id}"`, {
+                expand: 'user'
+            });
+
+            if (!passkeyRecord || !passkeyRecord.expand?.user) {
+                throw new Error("No user associated with this passkey.");
+            }
+
+            const user = passkeyRecord.expand.user;
+            console.log("[Auth] Found user for passkey:", user.id);
+
+            // Since we don't have a secure backend verification yet that returns a token,
+            // we'll check if we have the MK locally. If not, we still need to "log in" 
+            // to get a valid PB session for the user.
+
+            // This is where the backend hook POST /api/onyx/passkey/verify would come in.
+            // It would verify the signature and return a token.
+
+            // For now, let's assume we need to refresh the session if not valid
+            if (!pb.authStore.isValid) {
+                console.warn("[Auth] No valid session. Backend verification required.");
+                // setMessage({ type: 'error', text: "Backend verification not yet implemented." });
+                // return;
+            }
+
+            const storedMk = localStorage.getItem('onyx_mk');
+            if (storedMk) {
+                completeAuth(storedMk);
             } else {
-                setMode('challenge_password');
-                setMessage({ type: 'success', text: "Verified! Please enter password to refresh session." });
+                // Session potentially valid, but keys missing (new device)
+                setMode('recovery_input');
+                setMessage({ type: 'success', text: "Identify confirmed. Enter Recovery Key to decrypt data." });
             }
         } catch (err: any) {
-            console.error(err);
-            setMessage({ type: 'error', text: "Passkey verification failed." });
+            console.error("[Auth] Passkey Login Failed:", err);
+            setMessage({ type: 'error', text: err.message || "Passkey verification failed." });
         } finally {
             setLoading(false);
         }
@@ -840,10 +863,14 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
         // Check for Blind Account (OAuth)
         const user = pb.authStore.model;
         const isBlind = user?.email?.includes('@blind.onyx');
+        const needsIdentitySetup = !user?.key_wrapped_rk; // Force existing unfinished OAuth users into setup wizard
 
-        if (isNew || isBlind) {
+        if (isNew || isBlind || needsIdentitySetup) {
             // New User or Blind User -> Setup Master Key & Profile
-            setMode('signup_security');
+            if (user?.name) {
+                setDisplayName(user.name);
+            }
+            setMode('signup_username');
         } else {
             // Existing User -> Check for stored key
             const storedMk = localStorage.getItem('onyx_mk');
@@ -879,6 +906,38 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
         }
     };
 
+    const handleProfileSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+            const mk = localStorage.getItem('onyx_mk') || sessionStorage.getItem('onyx_mk');
+            if (!mk) throw new Error("Encryption key missing.");
+
+            const formData = new FormData();
+
+            // Encrypt & Update Name
+            const nameEncrypted = await encryptData(displayName || "Onyx Traveller", mk);
+            formData.append('name', nameEncrypted);
+
+            // Avatar Handling
+            if (avatarFile) {
+                const encryptedAvatarFile = await encryptFile(avatarFile, mk);
+                formData.append('avatar', encryptedAvatarFile);
+            }
+
+            await pb.collection('users').update(pb.authStore.model!.id, formData);
+
+            // After profile setup, show recovery phrase
+            setMode('show_phrase');
+
+            if (onSuccess) onSuccess();
+        } catch (err: any) {
+            console.error("Profile update failed:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleOAuth = async (providerName: string) => {
         setLoading(true);
         // @ts-ignore
@@ -892,7 +951,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
             const authMethods = await pb.collection('users').listAuthMethods();
             console.log("Full Auth Response:", JSON.stringify(authMethods, null, 2));
 
-            const providers = (authMethods as any).authProviders || [];
+            const providers = (authMethods as any).oauth2?.providers || (authMethods as any).authProviders || [];
             const provider = providers.find((p: any) => p.name.toLowerCase() === providerName.toLowerCase());
 
             if (!provider) {
@@ -910,9 +969,32 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                     const { start, onUrl, cancel } = await import('@fabianlars/tauri-plugin-oauth');
                     const { openUrl } = await import('@tauri-apps/plugin-opener');
 
-                    const port = await start();
-                    const redirectUrl = `http://localhost:${port}`;
-                    const targetUrl = provider.authUrl + '&redirect_uri=' + encodeURIComponent(redirectUrl);
+                    // Cancel any existing listener that survived HMR or double-clicks
+                    // @ts-ignore
+                    if (window.__ONYX_OAUTH_PORT) {
+                        try {
+                            // @ts-ignore
+                            await cancel(window.__ONYX_OAUTH_PORT);
+                        } catch (e) { }
+                    }
+
+                    // Try port 1421 by default to avoid conflict with the Vite dev server on 1420
+                    // THIS IS THE REDIRECT URI FOR GOOGLE/AZURE: http://localhost:1421/
+                    let port = 1421;
+                    const customHtml = `<!DOCTYPE html><html><head><title>Onyx Authentication</title><style>body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.c{text-align:center}.logo{font-size:24px;font-weight:300;letter-spacing:.3em;margin-bottom:24px;display:inline-block}.status{color:#a1a1aa;font-size:14px;margin-top:16px}.spinner{width:24px;height:24px;border:2px solid #333;border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto}@keyframes spin{to{transform:rotate(360deg)}}</style><script>setTimeout(function(){window.close();document.getElementById("msg").innerText="You can safely close this window and return to Onyx.";document.getElementById("spin").style.display="none"},2000);</script></head><body><div class="c"><div class="logo">ONYX.</div><div id="spin" class="spinner"></div><div id="msg" class="status">Authentication Successful...</div></div></body></html>`;
+                    try {
+                        port = await start({ ports: [1421], response: customHtml });
+                    } catch (e) {
+                        console.warn("Could not bind to 1421, trying random", e);
+                        port = await start({ response: customHtml });
+                    }
+
+                    // @ts-ignore
+                    window.__ONYX_OAUTH_PORT = port;
+
+                    const redirectUrl = `http://localhost:${port}/`;
+                    // Note: Pocketbase provider config automatically appends &redirect_uri= to the end natively
+                    const targetUrl = provider.authUrl + encodeURIComponent(redirectUrl);
 
                     await openUrl(targetUrl);
 
@@ -922,7 +1004,12 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
 
                         const cleanup = () => {
                             if (unlisten) unlisten();
-                            cancel(port).catch(console.warn);
+                            // @ts-ignore
+                            if (window.__ONYX_OAUTH_PORT === port) {
+                                cancel(port).catch(console.warn);
+                                // @ts-ignore
+                                window.__ONYX_OAUTH_PORT = null;
+                            }
                         };
 
                         // Timeout 2min
@@ -971,8 +1058,8 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
             } else {
                 // --- WEB FLOW ---
                 localStorage.setItem('oauth_provider', JSON.stringify(provider));
-                const redirectUrl = window.location.origin + '/auth/callback';
-                const targetUrl = provider.authUrl + '&redirect_uri=' + encodeURIComponent(redirectUrl);
+                const redirectUrl = window.location.origin + '/auth/callback/';
+                const targetUrl = provider.authUrl + encodeURIComponent(redirectUrl);
                 window.location.href = targetUrl;
             }
 
@@ -988,10 +1075,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
 
     // --- RENDER ---
 
-    const handleSelectPasskeyMethod = () => {
-        setSignupMethod('passkey');
-        setMode('signup_2fa'); // Skip Password creation, go straight to 2FA or Profile
-    };
+
 
     const handleSelectPasswordMethod = () => {
         setSignupMethod('password');
@@ -1117,11 +1201,12 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
             case 'signup_username': return { title: "Create Identity", icon: Fingerprint, subtitle: "" };
             case 'signup_otp': return { title: "Check your email", icon: Mail, subtitle: "" };
             case 'magic_link_sent': return { title: "Check your email", icon: Mail, subtitle: "" };
-            case 'signup_recovery': return { title: "Recovery Phrase", icon: ShieldCheck, subtitle: "" };
             case 'login_options': return { title: "Welcome Back", icon: Fingerprint, subtitle: "" };
             case 'signup_security': return { title: "Secure Your Vault", icon: Lock, subtitle: "" };
             case 'signup_2fa': return { title: "Extra Protection", icon: QrCode, subtitle: "" };
             case 'signup_profile': return { title: "Account Customisation", icon: Fingerprint, subtitle: "" };
+            case 'signup_waiting': return { title: "Registering Passkey", icon: Fingerprint, subtitle: "" };
+            case 'passkey_setup': return { title: "Register Passkey", icon: Fingerprint, subtitle: "" };
             default: return { title: "Onyx", icon: Fingerprint, subtitle: "" };
         }
     };
@@ -1133,11 +1218,12 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
         switch (mode) {
             case 'magic_link_sent': return { onClick: () => setMode('identity'), label: "Change Email" };
             case 'signup_otp': return { onClick: () => setMode('identity'), label: "Back" };
-            case 'signup_recovery': return { onClick: () => setMode('signup_username'), label: "Back" };
-            case 'secure_account_choice': return { onClick: () => setMode('signup_recovery'), label: "Back" };
+            case 'secure_account_choice': return { onClick: () => setMode('signup_username'), label: "Back" };
             case 'signup_security': return { onClick: () => setMode('secure_account_choice'), label: "Back" };
             case 'signup_2fa': return { onClick: () => setMode('signup_security'), label: "Back" };
             case 'signup_profile': return { onClick: () => setMode('signup_2fa'), label: "Back" };
+            case 'signup_waiting': return { onClick: () => setMode('login_options'), label: "Back" };
+            case 'passkey_setup': return { onClick: () => setMode('secure_account_choice'), label: "Back" };
             case 'challenge_passkey': return { onClick: () => setMode('login_options'), label: "Back" };
             case 'challenge_password': return { onClick: () => setMode('login_options'), label: "Back" };
             case 'signup_username': return { onClick: () => setMode(identifier.includes('@') ? 'signup_otp' : 'identity'), label: "Back" };
@@ -1153,7 +1239,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
     // --- RENDER ---
 
     return (
-        <div className="w-full relative h-[580px] flex flex-col">
+        <div className="w-full relative h-145 flex flex-col">
 
             {/* --- STATIC HEADER & NAVIGATION (PINNED) --- */}
             {backAction && <BackBtn onClick={backAction.onClick} label={backAction.label} />}
@@ -1175,13 +1261,12 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
 
             {/* --- CONTENT AREA (ANIMATED) --- */}
 
-            <div className="flex-1 w-full pt-[220px] overflow-y-auto overflow-x-visible px-16 scrollbar-none" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            <div className="flex-1 w-full pt-55 overflow-y-auto overflow-x-visible px-16 scrollbar-none" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
 
                 {/* --- STEP 1: IDENTITY (Unified Sign In/Up) --- */}
 
                 {mode === 'signup_otp' && (
                     <div className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-5">
-
                         <form onSubmit={handleOtpVerify} className="space-y-5">
                             <div className="space-y-2">
                                 <AuthInput
@@ -1196,7 +1281,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                             <button
                                 type="submit"
                                 disabled={loading || otpCode.length < 6}
-                                className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-purple-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                className="w-full bg-linear-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-purple-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 {loading ? <Loader2 size={16} className="animate-spin" /> : <><span>Verify Code</span><ArrowRight size={16} /></>}
                             </button>
@@ -1235,95 +1320,30 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                     />
                 )}
 
-                {mode === 'signup_recovery' && (
-                    <div className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-4">
-
-                        <div className="space-y-6 w-full max-w-2xl mx-auto">
-                            {/* Premium card with gradient border */}
-                            <div className="relative rounded-2xl p-[1px] bg-gradient-to-br from-purple-500/40 via-white/5 to-indigo-500/40 shadow-2xl">
-                                <div className="bg-zinc-900/95 rounded-2xl overflow-hidden backdrop-blur-md">
-                                    {/* Card header */}
-                                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-                                        <div className="flex items-center gap-2 text-zinc-400">
-                                            <Key size={14} className="text-purple-400" />
-                                            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-300">Recovery Phrase</span>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={async (e) => {
-                                                const btn = e.currentTarget;
-                                                if (generatedPhrase) await navigator.clipboard.writeText(generatedPhrase);
-
-                                                // Success State
-                                                btn.classList.add('bg-emerald-500', 'text-black', 'border-transparent', 'hover:bg-emerald-400');
-                                                btn.classList.remove('text-zinc-400', 'hover:text-white', 'hover:bg-white/5');
-
-                                                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="font-bold">Copied!</span>`;
-
-                                                setTimeout(() => {
-                                                    // Revert
-                                                    btn.classList.remove('bg-emerald-500', 'text-black', 'border-transparent', 'hover:bg-emerald-400');
-                                                    btn.classList.add('text-zinc-400', 'hover:text-white', 'hover:bg-white/5');
-
-                                                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg><span>Copy</span>`;
-                                                }, 2000);
-                                            }}
-                                            className="flex items-center gap-2 text-xs font-bold text-zinc-400 hover:text-white transition-all duration-300 px-3 py-1.5 rounded-lg border border-white/5 hover:bg-white/5 active:scale-95"
-                                        >
-                                            <Copy size={14} /><span>Copy</span>
-                                        </button>
-                                    </div>
-
-                                    {/* 4-column word grid with staggered animation */}
-                                    <div className="p-5 grid grid-cols-4 gap-3">
-                                        {generatedPhrase?.split(' ').map((word, i) => (
-                                            <div
-                                                key={i}
-                                                className="flex items-center gap-1.5 bg-zinc-900/60 hover:bg-zinc-800/80 px-2 py-2 rounded-xl border border-white/5 hover:border-purple-500/20 transition-all duration-300 cursor-default animate-in fade-in slide-in-from-bottom-2"
-                                                style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}
-                                            >
-                                                <span className="text-[8px] text-purple-400/60 font-mono select-none w-3 shrink-0">{i + 1}</span>
-                                                <span className="text-[10px] font-bold text-zinc-200 font-mono select-all tracking-wide truncate">{word}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Subtle warning */}
-                            <div className="flex items-center gap-2 px-1">
-                                <AlertTriangle className="text-amber-500/60 shrink-0" size={11} />
-                                <p className="text-[10px] text-zinc-500 leading-relaxed">
-                                    This is the <span className="text-zinc-400 font-semibold">only way</span> to recover your account. Store it somewhere safe.
-                                </p>
-                            </div>
-
-                            {/* Save button */}
-                            <form onSubmit={handleRecoveryConfirm}>
-                                <button
-                                    type="submit"
-                                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white py-3.5 rounded-full font-bold shadow-[0_0_30px_rgba(168,85,247,0.2)] transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(168,85,247,0.3)] active:scale-[0.98] flex items-center justify-center gap-2"
-                                >
-                                    I have saved my phrase <ArrowRight size={16} />
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
                 {mode === 'login_options' && (
                     <div className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-5">
-
-                        <div className="space-y-3">
+                        <div className="space-y-4 p-8 -m-8 h-145">
                             {/* Dynamic Options */}
                             {availableAuthMethods.passkey && (
                                 <button
                                     key="passkey"
-                                    onClick={() => setMode('challenge_passkey')}
-                                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-white py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 group"
+                                    onClick={handlePasskeyLogin}
+                                    className="w-full relative overflow-hidden bg-linear-to-br from-purple-600 to-indigo-800 border-purple-400/50 hover:border-white/30 text-white font-bold py-7 rounded-3xl transition-all flex items-center gap-6 px-8 shadow-[0_0_30px_rgba(168,85,247,0.2)] hover:shadow-[0_0_50px_rgba(168,85,247,0.4)] hover:scale-[1.02] active:scale-[0.98] group text-left isolate border"
                                 >
-                                    <KeyRound size={20} className="text-purple-500 group-hover:scale-110 transition-transform" />
-                                    <span>Sign in with Passkey</span>
+                                    <div className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0_340deg,white_360deg)] animate-[spin_3s_linear_infinite] opacity-10 group-hover:opacity-20 transition-opacity duration-500 blur-xl"></div>
+                                    <div className="absolute inset-0 bg-linear-to-br from-purple-500 via-transparent to-indigo-900 opacity-50 group-hover:opacity-30 transition-opacity duration-700"></div>
+                                    <div className="absolute inset-px bg-linear-to-br from-purple-600/90 to-indigo-900/90 rounded-[23px] z-0"></div>
+                                    <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 border border-white/20 group-hover:bg-white/20 group-hover:border-white/40 transition-all duration-500 z-10 relative shadow-inner">
+                                        <Fingerprint size={28} className="text-white group-hover:scale-110 transition-transform duration-500" />
+                                    </div>
+                                    <div className="z-10 flex-1 relative">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-lg font-bold tracking-tight text-white drop-shadow-md">Sign in with Passkey</span>
+                                            <span className="bg-white/20 text-white text-[9px] font-bold uppercase px-2 py-0.5 rounded border border-white/20 shadow-sm backdrop-blur-md">Fast</span>
+                                        </div>
+                                        <p className="text-xs text-purple-100/80 group-hover:text-white transition-colors font-medium">Biometric or hardware key</p>
+                                    </div>
+                                    <ChevronRight className="ml-auto text-white group-hover:translate-x-1 transition-all duration-500 z-10 relative" />
                                 </button>
                             )}
 
@@ -1331,10 +1351,15 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                 <button
                                     key="password"
                                     onClick={() => setMode('challenge_password')}
-                                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-white py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 group"
+                                    className="w-full relative overflow-hidden bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/20 text-white font-bold py-6 rounded-2xl transition-all flex items-center gap-6 px-6 shadow-sm hover:scale-[1.01] active:scale-[0.98] group text-left isolate backdrop-blur-sm"
                                 >
-                                    <Lock size={20} className="text-zinc-400 group-hover:text-white transition-colors" />
-                                    <span>Sign in with Password</span>
+                                    <div className="w-10 h-10 rounded-xl bg-zinc-800/50 flex items-center justify-center shrink-0 border border-white/5 group-hover:border-white/20 transition-all duration-500 relative z-10">
+                                        <Lock size={18} className="text-zinc-500 group-hover:text-white transition-all duration-500" />
+                                    </div>
+                                    <div className="flex-1 relative z-10">
+                                        <h4 className="text-md font-bold text-zinc-300 group-hover:text-white transition-colors">Master Password</h4>
+                                    </div>
+                                    <ChevronRight className="ml-auto text-zinc-600 group-hover:text-white transition-all duration-500 z-10 relative group-hover:translate-x-1" />
                                 </button>
                             )}
 
@@ -1342,40 +1367,41 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                 <button
                                     key="magic"
                                     onClick={() => {
-                                        // Trigger send magic link logic here if needed
                                         console.log(`[DEV] Sending magic link to ${identifier}`);
                                         setMode('magic_link_sent');
                                     }}
-                                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-white py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 group"
+                                    className="w-full relative overflow-hidden bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/20 text-white font-bold py-6 rounded-2xl transition-all flex items-center gap-6 px-6 shadow-sm hover:scale-[1.01] active:scale-[0.98] group text-left isolate backdrop-blur-sm"
                                 >
-                                    <Mail size={20} className="text-blue-400 group-hover:scale-110 transition-transform" />
-                                    <span>Send Magic Link</span>
+                                    <div className="w-10 h-10 rounded-xl bg-zinc-800/50 flex items-center justify-center shrink-0 border border-white/5 group-hover:border-white/20 transition-all duration-500 relative z-10">
+                                        <Mail size={18} className="text-blue-400 group-hover:scale-110 transition-transform" />
+                                    </div>
+                                    <div className="flex-1 relative z-10">
+                                        <h4 className="text-md font-bold text-zinc-300 group-hover:text-white transition-colors">Magic Link</h4>
+                                    </div>
+                                    <ChevronRight className="ml-auto text-zinc-600 group-hover:text-white transition-all duration-500 z-10 relative group-hover:translate-x-1" />
                                 </button>
                             )}
 
-                            {/* Fallback if no methods strictly available (e.g. only recovery) */}
                             {!availableAuthMethods.passkey && !availableAuthMethods.password && !availableAuthMethods.magicLink && (
-                                <p className="text-center text-zinc-500 text-sm py-2">No standard login methods available.</p>
+                                <p className="text-center text-zinc-500 text-sm py-2 italic font-medium">No standard login methods available.</p>
                             )}
-
-                            <div className="relative py-4">
-                                <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-white/10" /></div>
-                                <div className="relative flex justify-center text-xs uppercase"><span className="bg-[#09090b] px-2 text-zinc-500">Or</span></div>
-                            </div>
-
-                            <button
-                                onClick={() => setMode('recovery_input')}
-                                className="w-full bg-transparent hover:bg-white/5 border border-white/10 text-zinc-400 hover:text-white py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
-                            >
-                                <Shield size={16} /> Use Recovery Key
-                            </button>
                         </div>
+                        <div className="relative py-4">
+                            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-white/10" /></div>
+                            <div className="relative flex justify-center text-xs uppercase"><span className="bg-[#09090b] px-2 text-zinc-500">Or</span></div>
+                        </div>
+
+                        <button
+                            onClick={() => setMode('recovery_input')}
+                            className="w-full bg-transparent hover:bg-white/5 border border-white/10 text-zinc-400 hover:text-white py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
+                        >
+                            <Shield size={16} /> Use Recovery Key
+                        </button>
                     </div>
                 )}
 
                 {mode === 'identity' && (
                     <div className="animate-in fade-in slide-in-from-bottom-8 duration-500 space-y-5 group/email">
-
                         {manualAuthResult ? (
                             <div className="bg-emerald-500/10 p-6 rounded-2xl border border-emerald-500/20 text-center space-y-4 animate-in zoom-in-95">
                                 <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1422,7 +1448,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                 </div>
 
                                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex gap-3 items-start">
-                                    <div className="mt-0.5 min-w-[16px] text-blue-400"><div className="w-1.5 h-1.5 bg-current rounded-full animate-pulse mt-1.5 ml-1" /></div>
+                                    <div className="mt-0.5 min-w-4 text-blue-400"><div className="w-1.5 h-1.5 bg-current rounded-full animate-pulse mt-1.5 ml-1" /></div>
                                     <p className="text-xs text-blue-200/80 leading-relaxed">
                                         A browser window has opened. Log in there, then copy the <strong>Auth Token</strong> and paste it below.
                                     </p>
@@ -1451,7 +1477,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                         <button
                                             type="submit"
                                             disabled={!manualToken}
-                                            className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-purple-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                            className="flex-1 py-3.5 rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-purple-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             Verify & Login
                                         </button>
@@ -1460,9 +1486,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                             </div>
                         ) : (
                             <>
-                                {/* Row 1: Integrated Socials (Apple / Google) */}
                                 <div className="grid grid-cols-2 gap-4">
-                                    {/* Microsoft - 4-Color Grid */}
                                     <button
                                         type="button"
                                         onClick={() => handleOAuth('Microsoft')}
@@ -1477,7 +1501,6 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                         </svg>
                                     </button>
 
-                                    {/* Google - Filled Grey */}
                                     <button
                                         type="button"
                                         onClick={() => handleOAuth('Google')}
@@ -1488,14 +1511,12 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                     </button>
                                 </div>
 
-                                {/* Separator with Lines */}
                                 <div className="relative flex items-center gap-4">
                                     <div className="h-px bg-white/5 flex-1" />
                                     <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest transition-colors group-focus-within/email:text-purple-400">Or Email / Username</span>
                                     <div className="h-px bg-white/5 flex-1" />
                                 </div>
 
-                                {/* Row 3: Email Input & Single "Continue" Button */}
                                 <form onSubmit={handleIdentitySubmit} className="space-y-5">
                                     <AuthInput
                                         type="text"
@@ -1508,9 +1529,9 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                     <button
                                         type="submit"
                                         disabled={loading || !identifier.match(/[@#].+/)}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-default group flex items-center justify-center gap-2"
+                                        className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-default group flex items-center justify-center gap-2 transform-origin-center"
                                     >
-                                        {loading ? <Loader2 size={16} className="animate-spin" /> : <span>Continue <ArrowRight size={16} className="inline ml-1 group-hover:translate-x-1 transition-transform" /></span>}
+                                        {loading ? <Loader2 size={16} className="animate-spin" /> : <span>Continue <ArrowRight size={16} className="inline ml-1" /></span>}
                                     </button>
                                 </form>
 
@@ -1520,20 +1541,16 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
                                         onClick={() => {
                                             setIdentifier('');
                                             setMode('signup_username');
-                                            // Trigger tag gen if not already
                                             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
                                             let result = '';
-                                            const len = 5;
-                                            for (let i = 0; i < len; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+                                            for (let i = 0; i < 5; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
                                             setCustomTag(result);
                                         }}
                                         className="transition-all duration-200 hover:scale-105 hover:text-white"
                                     >
                                         Continue without email
                                     </button>
-
                                     <div className="w-1 h-1 rounded-full bg-zinc-700" />
-
                                     <button
                                         type="button"
                                         onClick={() => setMode('recovery_input')}
@@ -1549,388 +1566,398 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
 
 
                 {/* --- STEP 2: MAGIC LINK VERIFY --- */}
-                {
-                    mode === 'magic_link_sent' && (
-                        <div className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-5">
-
-                            <form onSubmit={handleMagicLinkVerify} className="space-y-5">
-                                <div className="text-center">
-                                    <AuthInput
-                                        type="text"
-                                        value={otpCode}
-                                        onChange={(e: any) => setOtpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                                        placeholder="000000"
-                                        autoFocus
-                                        required
-                                        className="text-center tracking-[0.5em] text-2xl font-mono"
-                                    />
-                                </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={loading || otpCode.length < 6}
-                                    className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-4 rounded-xl shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-                                >
-                                    {loading ? <Loader2 size={16} className="animate-spin" /> : "Verify Code"}
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={() => handleIdentitySubmit({ preventDefault: () => { } } as any)}
-                                    className="text-xs text-zinc-500 hover:text-white transition-colors flex items-center justify-center gap-2 mx-auto"
-                                >
-                                    <RefreshCw size={12} /> Resend Code
-                                </button>
-                            </form>
-                        </div>
-                    )
-                }
-
-                {/* --- STEP 3: SECURE ACCOUNT CHOICE (Splits Flow) --- */}
-                {
-                    mode === 'secure_account_choice' && (
-                        <div className="animate-in fade-in scale-95 duration-500 text-left p-8 -m-8">
-                            <div className="space-y-6">
-                                {/* Passkey Btn */}
-                                <button
-                                    onClick={handleSelectPasskeyMethod}
-                                    className={`w-full relative overflow-hidden bg-gradient-to-br from-purple-600 to-indigo-800 border-purple-400/50 hover:border-white/30 text-white font-bold py-8 rounded-3xl transition-all flex items-center gap-6 px-8 shadow-[0_0_30px_rgba(168,85,247,0.2)] hover:shadow-[0_0_50px_rgba(168,85,247,0.4)] hover:scale-[1.02] active:scale-[0.98] group text-left isolate border`}
-                                >
-                                    <div className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0_340deg,white_360deg)] animate-[spin_3s_linear_infinite] opacity-10 group-hover:opacity-20 transition-opacity duration-500 blur-xl" />
-                                    <div className="absolute inset-0 bg-gradient-to-br from-purple-500 via-transparent to-indigo-900 opacity-50 group-hover:opacity-30 transition-opacity duration-700" />
-                                    <div className="absolute inset-[1px] bg-gradient-to-br from-purple-600/90 to-indigo-900/90 rounded-[23px] z-0" />
-                                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-purple-400/20 blur-[100px] rounded-full animate-pulse opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
-
-                                    <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 border border-white/20 group-hover:bg-white/20 group-hover:border-white/40 transition-all duration-500 z-10 relative shadow-inner">
-                                        <Fingerprint size={28} className="text-white transition-all duration-500" />
-                                    </div>
-                                    <div className="z-10 flex-1 relative">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <h4 className="text-lg font-bold tracking-tight text-white drop-shadow-md">Passkey</h4>
-                                            <span className="bg-white/20 text-white text-[9px] font-bold uppercase px-2 py-0.5 rounded border border-white/20 shadow-sm backdrop-blur-md">Recommended</span>
-                                        </div>
-
-                                        <p className="text-xs text-purple-100/80 group-hover:text-white transition-colors font-medium">
-                                            {identifier ? "Fast, biometric sign-in. No password required." : "Recommended for fast, secure access."}
-                                        </p>
-                                    </div>
-                                    <ChevronRight className="ml-auto text-white group-hover:translate-x-1 transition-all duration-500 z-10 relative" />
-                                </button>
-
-                                {/* Password Btn */}
-                                <button
-                                    onClick={handleSelectPasswordMethod}
-                                    className="w-full relative overflow-hidden bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/20 text-white font-bold py-8 rounded-3xl transition-all flex items-center gap-6 px-8 shadow-sm hover:shadow-[0_0_30px_rgba(255,255,255,0.05)] hover:scale-[1.01] active:scale-[0.98] group text-left isolate backdrop-blur-sm"
-                                >
-                                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-                                    <div className="w-14 h-14 rounded-2xl bg-zinc-800/50 flex items-center justify-center shrink-0 border border-white/5 group-hover:border-white/20 group-hover:bg-zinc-700/50 transition-all duration-500 relative z-10">
-                                        <Lock size={24} className="text-zinc-500 group-hover:text-white transition-all duration-500" />
-                                    </div>
-                                    <div className="flex-1 relative z-10">
-                                        <h4 className="text-lg font-bold tracking-tight mb-1 text-zinc-300 group-hover:text-white transition-colors">Master Password</h4>
-                                        <p className="text-xs text-zinc-500 group-hover:text-zinc-400 transition-colors font-medium">Traditional password + optional 2FA.</p>
-                                    </div>
-                                    <ChevronRight className="ml-auto text-zinc-600 group-hover:text-white transition-all duration-500 z-10 relative group-hover:translate-x-1" />
-                                </button>
+                {mode === 'magic_link_sent' && (
+                    <div className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-5">
+                        <form onSubmit={handleMagicLinkVerify} className="space-y-5">
+                            <div className="text-center">
+                                <AuthInput
+                                    type="text"
+                                    value={otpCode}
+                                    onChange={(e: any) => setOtpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                                    placeholder="000000"
+                                    autoFocus
+                                    required
+                                    className="text-center tracking-[0.5em] text-2xl font-mono"
+                                />
                             </div>
-                        </div>
-                    )
-                }
 
-                {/* --- STEP 4: SECURITY DETAILS (Password Only) --- */}
-                {
-                    mode === 'signup_security' && (
-                        <div className="animate-in fade-in slide-in-from-right-8 duration-500">
-                            <form onSubmit={handleSecuritySubmit} className="space-y-5">
-
-                                {/* Password Section */}
-                                <div className="space-y-6">
-                                    <div className="space-y-2">
-                                        <AuthInput label="Master Password" type="password" value={password} onChange={(e: any) => setPassword(e.target.value)} placeholder="At least 8 characters" autoFocus required />
-                                        <PasswordStrength password={password} />
-                                    </div>
-
-                                    <AuthInput
-                                        label="Confirm Password"
-                                        type="password"
-                                        value={confirmPassword}
-                                        onChange={(e: any) => setConfirmPassword(e.target.value)}
-                                        placeholder="Repeat password"
-                                        required
-                                        rightElement={
-                                            confirmPassword.length > 0 && password === confirmPassword ?
-                                                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[9px] font-bold uppercase tracking-wide border border-emerald-500/20">
-                                                    <Check size={10} /> Matches
-                                                </div> : null
-                                        }
-                                    />
-                                </div>
-
-                                <button
-                                    type="submit"
-                                    className="w-full bg-white text-black font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 mt-4"
-                                >
-                                    Continue <ArrowRight size={18} />
-                                </button>
-                            </form>
-                        </div>
-                    )
-                }
-
-                {/* --- STEP 4.5: 2FA SETUP (Compact) --- */}
-                {
-                    mode === 'signup_2fa' && (
-                        <div className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-4">
-                            {/* Compact Toggle Card */}
-                            <div
-                                onClick={() => { if (!isTotpEnabled) { generateTotp(); setIsTotpEnabled(true); } else { setIsTotpEnabled(false); setTotpVerified(false); } }}
-                                className={`cursor-pointer w-full p-5 rounded-2xl border transition-all duration-300 flex items-center gap-4 ${isTotpEnabled ? 'bg-purple-500/10 border-purple-500/40' : 'bg-zinc-900/50 border-white/10 hover:border-white/20 hover:bg-zinc-800/50'}`}
+                            <button
+                                type="submit"
+                                disabled={loading || otpCode.length < 6}
+                                className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-4 rounded-xl shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 transform-origin-center"
                             >
-                                <div className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors shrink-0 ${isTotpEnabled ? 'bg-purple-500 text-white' : 'bg-zinc-800 text-zinc-500'}`}>
-                                    <QrCode size={20} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <h3 className={`text-sm font-bold ${isTotpEnabled ? 'text-white' : 'text-zinc-400'}`}>{isTotpEnabled ? 'Authenticator Enabled' : 'Enable Authenticator'}</h3>
-                                    <p className="text-[10px] text-zinc-500 leading-relaxed">Secure your account with an authenticator app</p>
-                                </div>
-                                <div className={`w-10 h-6 rounded-full p-0.5 transition-colors shrink-0 ${isTotpEnabled ? 'bg-purple-500' : 'bg-zinc-700'}`}>
-                                    <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform duration-300 ${isTotpEnabled ? 'translate-x-4' : ''}`} />
-                                </div>
-                            </div>
-
-                            {/* Expanded Setup — only when toggled on */}
-                            {isTotpEnabled && (
-                                <div className="space-y-3 animate-in slide-in-from-top-4 fade-in duration-500">
-                                    <div className="flex items-start gap-4">
-                                        {/* QR Code with glow */}
-                                        <div className="shrink-0 relative">
-                                            <div className="absolute inset-0 bg-purple-500/15 blur-2xl rounded-full" style={{ animation: 'pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
-                                            <div
-                                                ref={qrRef}
-                                                className="w-[150px] h-[150px] flex items-center justify-center relative z-10"
-                                            >
-                                                {!totpQr && <Loader2 className="animate-spin text-purple-400 w-8 h-8" />}
-                                            </div>
-                                        </div>
-
-                                        {/* Verify Code + Copy Key */}
-                                        <div className="flex-1 space-y-2.5 pt-1">
-                                            <div className="space-y-1.5">
-                                                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-4">Verify Code</p>
-                                                <input
-                                                    type="text"
-                                                    value={totpVerifyCode}
-                                                    onChange={(e) => setTotpVerifyCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                                                    placeholder="000000"
-                                                    className="w-full bg-zinc-900/50 border border-white/5 rounded-full px-5 py-2.5 text-lg text-center font-mono tracking-[0.3em] focus:border-purple-500/50 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all placeholder:text-zinc-700"
-                                                    maxLength={6}
-                                                    autoFocus
-                                                />
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={verifyTotpSetup}
-                                                disabled={totpVerifyCode.length !== 6 || totpVerified}
-                                                className={`w-full py-2.5 rounded-full font-bold text-xs uppercase tracking-wider transition-all duration-300 ${totpVerified ? 'bg-emerald-500 text-black shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-50'}`}
-                                            >
-                                                {totpVerified ? <span className="flex items-center justify-center gap-1.5"><Check size={14} /> Verified</span> : 'Verify'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={async (e) => {
-                                                    const btn = e.currentTarget;
-                                                    await navigator.clipboard.writeText(totpSecret);
-                                                    btn.classList.add('text-emerald-400');
-                                                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!`;
-                                                    setTimeout(() => {
-                                                        btn.classList.remove('text-emerald-400');
-                                                        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg> Copy setup key`;
-                                                    }, 2000);
-                                                }}
-                                                className="w-full text-[10px] text-zinc-600 hover:text-zinc-400 transition-all duration-300 flex items-center justify-center gap-1.5 py-1"
-                                            >
-                                                <Copy size={10} /> Copy setup key
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                                {loading ? <Loader2 size={16} className="animate-spin" /> : "Verify Code"}
+                            </button>
 
                             <button
                                 type="button"
-                                onClick={() => setMode('signup_profile')}
-                                disabled={isTotpEnabled && !totpVerified}
-                                className={`w-full py-4 rounded-full font-bold shadow-lg transition-all duration-500 flex items-center justify-center gap-2 mt-2 ${isTotpEnabled && !totpVerified ? 'bg-zinc-800/80 text-zinc-500 cursor-not-allowed scale-[0.98] opacity-80' : 'bg-white text-black hover:bg-zinc-200 hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_20px_rgba(255,255,255,0.1)]'}`}
+                                onClick={() => handleIdentitySubmit({ preventDefault: () => { } } as any)}
+                                className="text-xs text-zinc-500 hover:text-white transition-colors flex items-center justify-center gap-2 mx-auto"
                             >
-                                {isTotpEnabled ? (totpVerified ? 'Continue' : 'Verify to Continue') : 'Skip for now'} <ArrowRight size={18} />
+                                <RefreshCw size={12} /> Resend Code
                             </button>
+                        </form>
+                    </div>
+                )}
+
+                {mode === 'secure_account_choice' && (
+                    <div className="animate-in fade-in scale-95 duration-500 text-left p-8 -m-8 space-y-4">
+                        <button
+                            onClick={() => {
+                                setSignupMethod('passkey');
+                                setMode('passkey_setup');
+                            }}
+                            className="w-full relative overflow-hidden bg-linear-to-br from-purple-600 to-indigo-800 border-purple-400/50 hover:border-white/30 text-white font-bold py-7 rounded-3xl transition-all flex items-center gap-6 px-8 shadow-[0_0_30px_rgba(168,85,247,0.2)] hover:shadow-[0_0_50px_rgba(168,85,247,0.4)] hover:scale-[1.02] active:scale-[0.98] group text-left isolate border"
+                        >
+                            <div className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0_340deg,white_360deg)] animate-[spin_3s_linear_infinite] opacity-10 group-hover:opacity-20 transition-opacity duration-500 blur-xl"></div>
+                            <div className="absolute inset-0 bg-linear-to-br from-purple-500 via-transparent to-indigo-900 opacity-50 group-hover:opacity-30 transition-opacity duration-700"></div>
+                            <div className="absolute inset-px bg-linear-to-br from-purple-600/90 to-indigo-900/90 rounded-[23px] z-0"></div>
+                            <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 border border-white/20 group-hover:bg-white/20 group-hover:border-white/40 transition-all duration-500 z-10 relative shadow-inner">
+                                <Fingerprint size={28} className="text-white group-hover:scale-110 transition-transform duration-500" />
+                            </div>
+                            <div className="z-10 flex-1 relative">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="text-lg font-bold tracking-tight text-white drop-shadow-md">Passkey</h4>
+                                    <span className="bg-white/20 text-white text-[9px] font-bold uppercase px-2 py-0.5 rounded border border-white/20 shadow-sm backdrop-blur-md">Recommended</span>
+                                </div>
+                                <p className="text-xs text-purple-100/80 group-hover:text-white transition-colors font-medium">Fastest and most secure setup.</p>
+                            </div>
+                            <ChevronRight className="ml-auto text-white group-hover:translate-x-1 transition-all duration-500 z-10 relative" />
+                        </button>
+
+                        <button
+                            onClick={handleSelectPasswordMethod}
+                            className="w-full relative overflow-hidden bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/20 text-white font-bold py-6 rounded-3xl transition-all flex items-center gap-6 px-8 shadow-sm hover:shadow-[0_0_30px_rgba(255,255,255,0.05)] hover:scale-[1.01] active:scale-[0.98] group text-left isolate backdrop-blur-sm transform-origin-center"
+                        >
+                            <div className="absolute inset-0 bg-linear-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                            <div className="w-14 h-14 rounded-2xl bg-zinc-800/50 flex items-center justify-center shrink-0 border border-white/5 group-hover:border-white/20 group-hover:bg-zinc-700/50 transition-all duration-500 relative z-10">
+                                <Lock size={24} className="text-zinc-500 group-hover:text-white transition-all duration-500" />
+                            </div>
+                            <div className="flex-1 relative z-10">
+                                <h4 className="text-lg font-bold tracking-tight mb-1 text-zinc-300 group-hover:text-white transition-colors">Master Password</h4>
+                                <p className="text-xs text-zinc-500 group-hover:text-zinc-400 transition-colors font-medium">Traditional password + optional 2FA.</p>
+                            </div>
+                            <ChevronRight className="ml-auto text-zinc-600 group-hover:text-white transition-all duration-500 z-10 relative group-hover:translate-x-1" />
+                        </button>
+                    </div>
+                )}
+
+                {mode === 'passkey_setup' && (
+                    <div className="animate-in fade-in slide-in-from-right-8 duration-500">
+                        <div className="flex items-center gap-6 mb-4">
+                            {[0, 1, 2].map((i) => (
+                                <div
+                                    key={i}
+                                    className="w-2.5 h-2.5 rounded-full animate-bounce shadow-lg bg-linear-to-t from-purple-600 to-purple-400 shadow-purple-500/30"
+                                    style={{ animationDelay: `${i * 0.15}s` }}
+                                />
+                            ))}
                         </div>
-                    )
-                }
+                        <div className="space-y-3">
+                            <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-zinc-500 animate-pulse mr-[-0.4em]">
+                                Passkey Registration
+                            </p>
+                            <p className="text-[10px] text-zinc-600 font-medium tracking-wide italic">Setting up your secure passkey...</p>
+                        </div>
+                    </div>
+                )}
 
-                {/* --- STEP 5: PROFILE DETAILS (Final) --- */}
-                {
-                    mode === 'signup_profile' && (
-                        <div className="animate-in fade-in slide-in-from-right-8 duration-500">
-                            <form onSubmit={handleSignup} className="space-y-5">
+                {mode === 'signup_security' && (
+                    <div className="animate-in fade-in slide-in-from-right-8 duration-500">
+                        <form onSubmit={handleSecuritySubmit} className="space-y-5">
+                            <div className="space-y-6">
+                                <div className="space-y-2">
+                                    <AuthInput label="Master Password" type="password" value={password} onChange={(e: any) => setPassword(e.target.value)} placeholder="At least 8 characters" autoFocus required />
+                                    <PasswordStrength password={password} />
+                                </div>
 
-                                <div className="flex items-center gap-6 mb-4">
-                                    <div className="relative group cursor-pointer shrink-0">
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            onChange={handleFileChange}
-                                            className="absolute inset-0 w-full h-full opacity-0 z-50 cursor-pointer"
-                                        />
-                                        <div className={`w-20 h-20 rounded-full border-2 ${avatarPreview ? 'border-purple-500' : 'border-dashed border-zinc-700'} flex items-center justify-center bg-zinc-900/50 group-hover:bg-zinc-800 transition-all overflow-hidden relative shadow-lg`}>
-                                            {avatarPreview ? (
-                                                <img src={avatarPreview} alt="Avatar Preview" className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="flex flex-col items-center gap-1 text-zinc-500 group-hover:text-zinc-300 transition-colors">
-                                                    <div className="p-1.5 rounded-full bg-zinc-800/50 group-hover:bg-zinc-700 transition-colors">
-                                                        <Fingerprint size={16} />
-                                                    </div>
-                                                </div>
-                                            )}
+                                <AuthInput
+                                    label="Confirm Password"
+                                    type="password"
+                                    value={confirmPassword}
+                                    onChange={(e: any) => setConfirmPassword(e.target.value)}
+                                    placeholder="Repeat password"
+                                    required
+                                    rightElement={
+                                        confirmPassword.length > 0 && password === confirmPassword ?
+                                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[9px] font-bold uppercase tracking-wide border border-emerald-500/20">
+                                                <Check size={10} /> Matches
+                                            </div> : null
+                                    }
+                                />
+                            </div>
+
+                            <button
+                                type="submit"
+                                className="w-full bg-white text-black font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-4"
+                            >
+                                Continue <ArrowRight size={18} />
+                            </button>
+                        </form>
+                    </div>
+                )}
+
+                {mode === 'signup_2fa' && (
+                    <div className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-4">
+                        <div
+                            onClick={() => { if (!isTotpEnabled) { generateTotp(); setIsTotpEnabled(true); } else { setIsTotpEnabled(false); setTotpVerified(false); } }}
+                            className={`cursor-pointer w-full p-5 rounded-2xl border transition-all duration-300 flex items-center gap-4 ${isTotpEnabled ? 'bg-purple-500/10 border-purple-500/40' : 'bg-zinc-900/50 border-white/10 hover:border-white/20 hover:bg-zinc-800/50'}`}
+                        >
+                            <div className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors shrink-0 ${isTotpEnabled ? 'bg-purple-500 text-white' : 'bg-zinc-800 text-zinc-500'}`}>
+                                <QrCode size={20} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <h3 className={`text-sm font-bold ${isTotpEnabled ? 'text-white' : 'text-zinc-400'}`}>{isTotpEnabled ? 'Authenticator Enabled' : 'Enable Authenticator'}</h3>
+                                <p className="text-[10px] text-zinc-500 leading-relaxed">Secure your account with an authenticator app</p>
+                            </div>
+                            <div className={`w-10 h-6 rounded-full p-0.5 transition-colors shrink-0 ${isTotpEnabled ? 'bg-purple-500' : 'bg-zinc-700'}`}>
+                                <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform duration-300 ${isTotpEnabled ? 'translate-x-4' : ''}`} />
+                            </div>
+                        </div>
+
+                        {isTotpEnabled && (
+                            <div className="space-y-3 animate-in slide-in-from-top-4 fade-in duration-500">
+                                <div className="flex items-start gap-4">
+                                    <div className="shrink-0 relative">
+                                        <div className="absolute inset-0 bg-purple-500/15 blur-2xl rounded-full animate-pulse" />
+                                        <div
+                                            ref={qrRef}
+                                            className="w-37.5 h-37.5 flex items-center justify-center relative z-10"
+                                        >
+                                            {!totpQr && <Loader2 className="animate-spin text-purple-400 w-8 h-8" />}
                                         </div>
                                     </div>
-                                    <div className="flex-1 space-y-4">
-                                        <AuthInput label="Display Name" type="text" value={displayName} onChange={(e: any) => setDisplayName(e.target.value)} placeholder="e.g. Onyx Traveller" autoFocus required />
 
-                                        {/* If Blind/OAuth: Ask for Recovery Email */}
-                                        {(!identifier || identifier.includes('@blind.onyx')) && (
-                                            <AuthInput
-                                                label="Recovery Email (Private)"
-                                                type="email"
-                                                value={recoveryEmail}
-                                                onChange={(e: any) => setRecoveryEmail(e.target.value)}
-                                                placeholder="For account recovery only"
-                                                required
-                                                className="border-purple-500/30 bg-purple-500/5 focus:border-purple-500/60"
+                                    <div className="flex-1 space-y-2.5 pt-1">
+                                        <div className="space-y-1.5">
+                                            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-4">Verify Code</p>
+                                            <input
+                                                type="text"
+                                                value={totpVerifyCode}
+                                                onChange={(e) => setTotpVerifyCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                                                placeholder="000000"
+                                                className="w-full bg-zinc-900/50 border border-white/5 rounded-full px-5 py-2.5 text-lg text-center font-mono tracking-[0.3em] focus:border-purple-500/50 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all placeholder:text-zinc-700"
+                                                maxLength={6}
+                                                autoFocus
                                             />
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={verifyTotpSetup}
+                                            disabled={totpVerifyCode.length !== 6 || totpVerified}
+                                            className={`w-full py-2.5 rounded-full font-bold text-xs uppercase tracking-wider transition-all duration-300 ${totpVerified ? 'bg-emerald-500 text-black shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-50'}`}
+                                        >
+                                            {totpVerified ? <span className="flex items-center justify-center gap-1.5"><Check size={14} /> Verified</span> : 'Verify'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={async (e) => {
+                                                const btn = e.currentTarget;
+                                                await navigator.clipboard.writeText(totpSecret);
+                                                btn.classList.add('text-emerald-400');
+                                                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!`;
+                                                setTimeout(() => {
+                                                    btn.classList.remove('text-emerald-400');
+                                                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg> Copy setup key`;
+                                                }, 2000);
+                                            }}
+                                            className="w-full text-[10px] text-zinc-600 hover:text-zinc-400 transition-all duration-300 flex items-center justify-center gap-1.5 py-1"
+                                        >
+                                            <Copy size={10} /> Copy setup key
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSignupMethod('password');
+                                handleSignup();
+                            }}
+                            disabled={isTotpEnabled && !totpVerified}
+                            className={`w-full py-4 rounded-full font-bold shadow-lg transition-all duration-500 flex items-center justify-center gap-2 mt-2 ${isTotpEnabled && !totpVerified ? 'bg-zinc-800/80 text-zinc-500 cursor-not-allowed scale-[0.98] opacity-80' : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] shadow-[0_0_20px_rgba(255,255,255,0.1)]'}`}
+                        >
+                            {isTotpEnabled ? (totpVerified ? 'Continue' : 'Verify to Continue') : 'Skip for now'} <ArrowRight size={18} />
+                        </button>
+                    </div>
+                )}
+
+                {mode === 'signup_profile' && (
+                    <div className="animate-in fade-in slide-in-from-right-8 duration-500">
+                        <form onSubmit={handleProfileSubmit} className="space-y-5">
+                            <div className="flex items-center gap-6 mb-4">
+                                <div className="relative group cursor-pointer shrink-0">
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleFileChange}
+                                        className="absolute inset-0 w-full h-full opacity-0 z-50 cursor-pointer"
+                                    />
+                                    <div className={`w-20 h-20 rounded-full border-2 ${avatarPreview ? 'border-purple-500' : 'border-dashed border-zinc-700'} flex items-center justify-center bg-zinc-900/50 group-hover:bg-zinc-800 transition-all overflow-hidden relative shadow-lg`}>
+                                        {avatarPreview ? (
+                                            <img src={avatarPreview} alt="Avatar Preview" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="flex flex-col items-center gap-1 text-zinc-500 group-hover:text-zinc-300 transition-colors">
+                                                <div className="p-1.5 rounded-full bg-zinc-800/50 group-hover:bg-zinc-700 transition-colors">
+                                                    <Fingerprint size={16} />
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={loading}
-                                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-bold py-4 rounded-full transition-all flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-95 duration-300"
-                                >
-                                    {loading ? <Loader2 size={18} className="animate-spin" /> : <><ShieldCheck size={20} /> Complete Setup</>}
-                                </button>
-                            </form>
-                        </div>
-                    )
-                }
-
-
-                {/* --- CHALLENGE PASSKEY --- */}
-                {
-                    mode === 'challenge_passkey' && (
-                        <div className="animate-in fade-in scale-95 duration-300">
-                            <div>
-                                <button
-                                    onClick={handlePasskeyLogin}
-                                    className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-16 rounded-[40px] transition-all flex flex-col items-center justify-center gap-4 shadow-[0_0_40px_rgba(255,255,255,0.1)] hover:shadow-[0_0_60px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-[0.98] duration-500 group relative overflow-hidden"
-                                >
-                                    <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                                    <Fingerprint size={48} className="text-zinc-900 group-hover:scale-110 transition-transform duration-500" />
-                                    <span className="text-lg tracking-tight relative z-10">Tap to Authenticate</span>
-                                </button>
-
-                                <button onClick={() => setMode('challenge_password')} className="mt-5 mx-auto block text-[10px] text-zinc-500 hover:text-white uppercase tracking-widest font-bold transition-colors">
-                                    Use Password Instead
-                                </button>
                             </div>
+                            <div className="space-y-3">
+                                <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-zinc-500 animate-pulse mr-[-0.4em]">
+                                    Account Customisation
+                                </p>
+                                <p className="text-[10px] text-zinc-600 font-medium tracking-wide italic">Add your name and avatar</p>
+                            </div>
+                            <div className="space-y-4">
+                                <AuthInput
+                                    label="Display Name"
+                                    type="text"
+                                    value={displayName}
+                                    onChange={(e: any) => setDisplayName(e.target.value)}
+                                    placeholder="Enter your name"
+                                    autoFocus
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-4"
+                            >
+                                {loading ? <Loader2 size={16} className="animate-spin" /> : 'Save Profile'}
+                            </button>
+                        </form>
+                    </div>
+                )}
+
+                {mode === 'signup_waiting' && (
+                    <div className="animate-in fade-in scale-95 duration-300">
+                        <div className="bg-zinc-900/50 border border-white/5 rounded-[40px] p-16 flex flex-col items-center justify-center gap-6 shadow-[0_0_40px_rgba(255,255,255,0.05)]">
+                            <div className="relative">
+                                <div className="absolute inset-0 bg-purple-500/20 blur-2xl animate-pulse rounded-full" />
+                                <Fingerprint size={64} className="text-purple-400 relative z-10 animate-bounce" />
+                            </div>
+                            <div className="text-center space-y-2">
+                                <h3 className="text-xl font-bold text-white">Registering Passkey</h3>
+                                <p className="text-sm text-zinc-500">Please confirm your identity using the system prompt (Windows Hello, Touch ID, etc.)</p>
+                            </div>
+
+                            <button
+                                onClick={() => setMode('identity')}
+                                className="mt-4 text-xs font-bold text-zinc-600 hover:text-white uppercase tracking-widest transition-colors"
+                            >
+                                Cancel
+                            </button>
                         </div>
-                    )
-                }
+                    </div>
+                )}
+
+                {mode === 'challenge_passkey' && (
+                    <div className="animate-in fade-in scale-95 duration-300">
+                        <div className="bg-zinc-900/50 border border-white/5 rounded-[40px] p-16 flex flex-col items-center justify-center gap-6 shadow-[0_0_40px_rgba(255,255,255,0.05)]">
+                            <div className="relative">
+                                <div className="absolute inset-0 bg-purple-500/20 blur-2xl animate-pulse rounded-full" />
+                                <Fingerprint size={64} className="text-purple-400 relative z-10 animate-bounce" />
+                            </div>
+                            <div className="text-center space-y-2">
+                                <h3 className="text-xl font-bold text-white">Authenticating...</h3>
+                                <p className="text-sm text-zinc-500">Please confirm your identity using the system prompt (Windows Hello, Touch ID, etc.)</p>
+                            </div>
+
+                            <button
+                                onClick={() => setMode('identity')}
+                                className="mt-4 text-xs font-bold text-zinc-600 hover:text-white uppercase tracking-widest transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* --- CHALLENGE PASSWORD --- */}
-                {
-                    mode === 'challenge_password' && (
-                        <div className="animate-in fade-in slide-in-from-right-8 duration-500">
-                            <form onSubmit={handlePasswordLogin} className="space-y-5">
-                                <div className="h-[4px]" aria-hidden="true" />
-                                <AuthInput label="Master Password" type="password" value={password} onChange={(e: any) => setPassword(e.target.value)} placeholder="••••••••" autoFocus />
-                                <button type="submit" disabled={loading} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-full transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 duration-300">
-                                    {loading ? <Loader2 size={18} className="animate-spin" /> : 'Unlock Vault'}
+                {mode === 'challenge_password' && (
+                    <div className="animate-in fade-in slide-in-from-right-8 duration-500">
+                        <form onSubmit={handlePasswordLogin} className="space-y-5">
+                            <div className="h-1" aria-hidden="true" />
+                            <AuthInput label="Master Password" type="password" value={password} onChange={(e: any) => setPassword(e.target.value)} placeholder="••••••••" autoFocus />
+                            <button type="submit" disabled={loading} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-full transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 duration-300">
+                                {loading ? <Loader2 size={18} className="animate-spin" /> : 'Unlock Vault'}
+                            </button>
+
+                            {/* Magic Link Fallback - Only for Email Users */}
+                            {identifier.includes('@') && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setMode('magic_link_sent');
+                                        // Simulate send
+                                        console.log("Sending recovery magic link...");
+                                    }}
+                                    className="w-full text-xs text-zinc-500 hover:text-white uppercase tracking-widest font-bold transition-colors py-2"
+                                >
+                                    Forgot Password? Send Magic Link
                                 </button>
+                            )}
+                        </form>
+                    </div>
+                )}
 
-                                {/* Magic Link Fallback - Only for Email Users */}
-                                {identifier.includes('@') && (
+                {/* --- SHOW RECOVERY PHRASE --- */}
+                {mode === 'show_phrase' && (
+                    <div className="animate-in fade-in zoom-in-95 duration-500">
+                        <div className="relative group">
+                            <div className="absolute -inset-0.5 bg-linear-to-r from-emerald-500 to-cyan-500 rounded-2xl opacity-20 group-hover:opacity-40 transition-opacity blur" />
+                            <div className="relative bg-zinc-950 border border-zinc-800 rounded-2xl p-6 mb-8 group-hover:border-zinc-700 transition-colors">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h5 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Recovery Key</h5>
                                     <button
-                                        type="button"
-                                        onClick={() => {
-                                            setMode('magic_link_sent');
-                                            // Simulate send
-                                            console.log("Sending recovery magic link...");
-                                        }}
-                                        className="w-full text-xs text-zinc-500 hover:text-white uppercase tracking-widest font-bold transition-colors py-2"
+                                        onClick={() => { navigator.clipboard.writeText(generatedPhrase || ''); setMessage({ type: 'success', text: "Copied to clipboard" }); }}
+                                        className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 transition-colors"
                                     >
-                                        Forgot Password? Send Magic Link
+                                        <Copy size={12} /> Copy
                                     </button>
-                                )}
-                            </form>
-                        </div>
-                    )
-                }
-
-                {/* --- RECOVERY --- */}
-                {
-                    mode === 'show_phrase' && (
-                        <div className="animate-in fade-in zoom-in-95 duration-500">
-                            <div className="relative group">
-                                <div className="absolute -inset-0.5 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-2xl opacity-20 group-hover:opacity-40 transition-opacity blur" />
-                                <div className="relative bg-zinc-950 border border-zinc-800 rounded-2xl p-6 mb-8 group-hover:border-zinc-700 transition-colors">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h5 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Recovery Key</h5>
-                                        <button
-                                            onClick={() => { navigator.clipboard.writeText(generatedPhrase || ''); setMessage({ type: 'success', text: "Copied to clipboard" }); }}
-                                            className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 transition-colors"
-                                        >
-                                            <Copy size={12} /> Copy
-                                        </button>
-                                    </div>
-                                    <div className="font-mono text-sm text-emerald-400 break-words leading-loose tracking-wide select-all text-center">
-                                        {generatedPhrase}
-                                    </div>
+                                </div>
+                                <div className="font-mono text-sm text-emerald-400 wrap-break-word leading-loose tracking-wide select-all text-center">
+                                    {generatedPhrase}
                                 </div>
                             </div>
-
-                            <div className="text-center space-y-4">
-                                <button
-                                    onClick={() => { if (onSuccess) onSuccess(); }}
-                                    className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-4 rounded-full transition-all flex items-center justify-center gap-2 shadow-[0_0_30px_rgba(255,255,255,0.1)] hover:scale-[1.02] active:scale-95 duration-300"
-                                >
-                                    <ShieldCheck size={18} /> I have saved it securely
-                                </button>
-                                <p className="text-[10px] text-zinc-600 font-medium max-w-[280px] mx-auto leading-relaxed">
-                                    This key exists <span className="text-zinc-400">only on your device</span>. If you lose it, we cannot recover your data.
-                                </p>
-                            </div>
                         </div>
-                    )
-                }
+
+                        <div className="text-center space-y-4">
+                            <button
+                                onClick={() => setMode('signup_profile')}
+                                className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-4 rounded-full transition-all flex items-center justify-center gap-2 shadow-[0_0_30px_rgba(255,255,255,0.1)] hover:scale-[1.02] active:scale-95 duration-300 transform-origin-center"
+                            >
+                                <ShieldCheck size={18} /> I have saved it securely
+                            </button>
+                            <p className="text-[10px] text-zinc-600 font-medium max-w-70 mx-auto leading-relaxed">
+                                This key exists <span className="text-zinc-400">only on your device</span>. If you lose it, we cannot recover your data.
+                            </p>
+                        </div>
+                    </div>
+                )}
 
                 {/* --- RECOVERY INPUT --- */}
-                {
-                    mode === 'recovery_input' && (
-                        <div className="animate-in fade-in zoom-in-95 duration-500">
-                            <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); /* Handle recovery */ }}>
-                                <textarea
-                                    value={recoveryPhraseInput}
-                                    onChange={(e) => setRecoveryPhraseInput(e.target.value)}
-                                    className="w-full bg-zinc-900/50 border border-white/5 rounded-3xl p-5 font-mono text-sm text-zinc-300 focus:border-purple-500/50 focus:ring-4 focus:ring-purple-500/10 focus:outline-none min-h-[100px] transition-all"
-                                    placeholder="Enter your 12-word recovery phrase..."
-                                />
-                                <button type="submit" className="w-full bg-purple-600 text-white font-bold py-4 rounded-full">Recover Account</button>
-                            </form>
-                        </div>
-                    )
-                }
-            </div >
-        </div >
-    )
-}
+                {mode === 'recovery_input' && (
+                    <div className="animate-in fade-in zoom-in-95 duration-500">
+                        <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); /* Handle recovery */ }}>
+                            <textarea
+                                value={recoveryPhraseInput}
+                                onChange={(e) => setRecoveryPhraseInput(e.target.value)}
+                                className="w-full bg-zinc-900/50 border border-white/5 rounded-3xl p-5 font-mono text-sm text-zinc-300 focus:border-purple-500/50 focus:ring-4 focus:ring-purple-500/10 focus:outline-none min-h-25 transition-all placeholder:text-zinc-700"
+                                placeholder="Enter your 12-word recovery phrase..."
+                            >
+                            </textarea>
+                            <button type="submit" className="w-full bg-purple-600 text-white font-bold py-4 rounded-full">Recover Account</button>
+                        </form>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};

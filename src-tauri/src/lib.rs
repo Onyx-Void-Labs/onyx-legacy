@@ -16,6 +16,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_oauth::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             tauri::async_runtime::block_on(async {
                 let db_pool = Database::setup(app.handle()).await;

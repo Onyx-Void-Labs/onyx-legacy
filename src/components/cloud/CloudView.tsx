@@ -18,50 +18,56 @@ const SAMPLE_FILES = [
     { name: 'notes-export.md', type: 'file' as const, size: '156 KB', modified: 'Feb 11, 2026' },
 ];
 
-export default function CloudView() {
+interface CloudViewProps {
+    sidebarCollapsed?: boolean;
+}
+
+export default function CloudView({ sidebarCollapsed = false }: CloudViewProps) {
     return (
         <div className="flex h-full overflow-hidden">
             {/* Folder Sidebar */}
-            <div className="w-56 bg-zinc-900/60 flex flex-col border-r border-zinc-800/30 shrink-0">
-                <div className="h-12 px-4 flex items-center gap-2 border-b border-zinc-800/30 shrink-0">
-                    <Cloud size={16} className="text-sky-400" />
-                    <span className="text-sm font-semibold text-zinc-200">Cloud Drive</span>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-                    {FOLDER_TREE.map(folder => (
-                        <button
-                            key={folder.name}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${folder.active
-                                ? 'bg-zinc-800/60 text-zinc-100'
-                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
-                                }`}
-                        >
-                            <folder.icon size={16} className={folder.active ? 'text-sky-400' : 'text-zinc-600'} />
-                            <span className="flex-1 text-left truncate">{folder.name}</span>
-                        </button>
-                    ))}
-
-                    <div className="pt-2">
-                        <button className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-500 hover:text-sky-400 hover:bg-sky-500/8 border border-dashed border-zinc-800 hover:border-sky-500/30 transition-all">
-                            <FolderPlus size={14} />
-                            <span>New Folder</span>
-                        </button>
+            <div className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0 opacity-0 border-none' : 'w-56 opacity-100 border-r border-zinc-800/30'}`}>
+                <div className="w-56 h-full flex flex-col bg-zinc-900/60">
+                    <div className="h-12 px-4 flex items-center gap-2 border-b border-zinc-800/30 shrink-0">
+                        <Cloud size={16} className="text-sky-400" />
+                        <span className="text-sm font-semibold text-zinc-200">Cloud Drive</span>
                     </div>
-                </div>
 
-                {/* Storage */}
-                <div className="border-t border-zinc-800/30 p-4 shrink-0 space-y-2">
-                    <div className="flex items-center gap-2 mb-1">
-                        <HardDrive size={14} className="text-zinc-500" />
-                        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Storage</span>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                        {FOLDER_TREE.map(folder => (
+                            <button
+                                key={folder.name}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${folder.active
+                                    ? 'bg-zinc-800/60 text-zinc-100'
+                                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
+                                    }`}
+                            >
+                                <folder.icon size={16} className={folder.active ? 'text-sky-400' : 'text-zinc-600'} />
+                                <span className="flex-1 text-left truncate">{folder.name}</span>
+                            </button>
+                        ))}
+
+                        <div className="pt-2">
+                            <button className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-500 hover:text-sky-400 hover:bg-sky-500/8 border border-dashed border-zinc-800 hover:border-sky-500/30 transition-all">
+                                <FolderPlus size={14} />
+                                <span>New Folder</span>
+                            </button>
+                        </div>
                     </div>
-                    <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-400">0 GB used</span>
-                        <span className="text-zinc-600">200 GB</span>
-                    </div>
-                    <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                        <div className="h-full w-0 bg-gradient-to-r from-sky-500 to-blue-500 rounded-full" />
+
+                    {/* Storage */}
+                    <div className="border-t border-zinc-800/30 p-4 shrink-0 space-y-2">
+                        <div className="flex items-center gap-2 mb-1">
+                            <HardDrive size={14} className="text-zinc-500" />
+                            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Storage</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-zinc-400">0 GB used</span>
+                            <span className="text-zinc-600">200 GB</span>
+                        </div>
+                        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div className="h-full w-0 bg-linear-to-r from-sky-500 to-blue-500 rounded-full" />
+                        </div>
                     </div>
                 </div>
             </div>

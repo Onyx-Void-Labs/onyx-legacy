@@ -3,15 +3,17 @@ export class PasskeyService {
 
     // --- UTILS: Base64URL Encoding/Decoding ---
 
-    // Encode ArrayBuffer to Base64URL string
+    // Encode ArrayBuffer to Base64URL string (RFC 4648)
     static bufferToBase64URL(buffer: ArrayBuffer): string {
         const bytes = new Uint8Array(buffer);
         let str = '';
-        for (const charCode of bytes) {
-            str += String.fromCharCode(charCode);
+        for (let i = 0; i < bytes.byteLength; i++) {
+            str += String.fromCharCode(bytes[i]);
         }
-        const users = btoa(str);
-        return users.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        return btoa(str)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
     }
 
     // Decode Base64URL string to Uint8Array
@@ -34,7 +36,19 @@ export class PasskeyService {
      * @param userId Stable user ID (e.g. "u_8x3k2n")
      */
     static async register(username: string, userId: string): Promise<any> {
-        console.log("[Passkey] Starting Registration...", { username, userId });
+        console.group("[Passkey] Registration");
+        console.log("Context:", {
+            username,
+            userId,
+            hostname: window.location.hostname,
+            secureContext: window.isSecureContext
+        });
+
+        if (!window.isSecureContext) {
+            console.error("WebAuthn requires a secure context (HTTPS or localhost).");
+            console.groupEnd();
+            throw new Error("Insecure Context: Passkeys require HTTPS.");
+        }
 
         // 1. Challenge
         const challenge = new Uint8Array(32);
@@ -44,13 +58,11 @@ export class PasskeyService {
         const userHandle = new TextEncoder().encode(userId);
 
         // 3. Create Credential Options
-        // We relax "authenticatorAttachment" to allow fallback if platform fails,
-        // but prefer "platform" for built-in ease.
         const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
             challenge: challenge,
             rp: {
                 name: "Onyx",
-                id: window.location.hostname // Crucial: Must match current domain
+                id: window.location.hostname === 'localhost' ? 'localhost' : window.location.hostname
             },
             user: {
                 id: userHandle,
@@ -62,33 +74,38 @@ export class PasskeyService {
                 { alg: -257, type: "public-key" }, // RS256
             ],
             authenticatorSelection: {
-                // "platform" forces Windows Hello / Touch ID.
-                // If this fails on some setups, removing it allows YubiKeys etc.
-                // We keep it "platform" as verified preferred, but you can remove to debug.
-                authenticatorAttachment: "platform",
+                // Relaxed: Removing authenticatorAttachment: "platform" allows the browser 
+                // to offer Windows Hello OR external keys (YubiKey) if platform is unavailable/disabled.
+                // We'll let the platform decide its "cross-platform" preference.
                 userVerification: "required", // Force PIN/Biometrics
                 residentKey: "required", // Discoverable Credential
+                requireResidentKey: true,
             },
             timeout: 60000,
             attestation: "none",
         };
 
-        console.log("[Passkey] Options:", publicKeyCredentialCreationOptions);
+        console.log("Options:", publicKeyCredentialCreationOptions);
 
         try {
             // 4. Create Credential
+            console.log("Calling navigator.credentials.create...");
             const credential = await navigator.credentials.create({
                 publicKey: publicKeyCredentialCreationOptions,
             }) as PublicKeyCredential;
 
-            if (!credential) throw new Error("Credential creation returned null.");
+            if (!credential) {
+                const err = new Error("Credential creation returned null.");
+                console.error(err);
+                throw err;
+            }
 
-            console.log("[Passkey] Created:", credential);
+            console.log("Credential Created Successfully:", credential);
 
             const response = credential.response as AuthenticatorAttestationResponse;
             const transports = typeof response.getTransports === 'function' ? response.getTransports() : [];
 
-            return {
+            const result = {
                 id: credential.id,
                 rawId: this.bufferToBase64URL(credential.rawId),
                 response: {
@@ -99,9 +116,18 @@ export class PasskeyService {
                 type: credential.type,
                 user_id: userId,
             };
-        } catch (err) {
-            console.error("[Passkey] Registration Failed:", err);
-            // Fallback suggestion logic could go here
+
+            console.log("Final Registration Data:", result);
+            console.groupEnd();
+            return result;
+        } catch (err: any) {
+            console.error("Registration Phase Failed:", err.name, err.message);
+            if (err.name === 'NotAllowedError') {
+                console.warn("User cancelled the prompt or permission denied.");
+            } else if (err.name === 'SecurityError') {
+                console.warn("RP ID mismatch or insecure origin.");
+            }
+            console.groupEnd();
             throw err;
         }
     }
@@ -112,46 +138,68 @@ export class PasskeyService {
      * Authenticates using a Passkey.
      * If no userId is provided, it attempts to "Discover" the user (Resident Key).
      */
-    static async authenticate(_challengeStr?: string): Promise<any> {
-        console.log("[Passkey] Starting Authentication...");
+    static async authenticate(): Promise<any> {
+        console.group("[Passkey] Authentication");
+        console.log("Context:", {
+            hostname: window.location.hostname,
+            secureContext: window.isSecureContext
+        });
+
+        if (!window.isSecureContext) {
+            console.error("WebAuthn requires a secure context.");
+            console.groupEnd();
+            throw new Error("Insecure Context: Passkeys require HTTPS.");
+        }
 
         const challenge = new Uint8Array(32);
         window.crypto.getRandomValues(challenge);
 
         const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {
             challenge: challenge,
-            rpId: window.location.hostname,
+            rpId: window.location.hostname === 'localhost' ? 'localhost' : window.location.hostname,
             userVerification: "required",
             // allowCredentials: [] // Empty = Discoverable Credential (Resident Key)
         };
 
-        console.log("[Passkey] Auth Options:", publicKeyCredentialRequestOptions);
+        console.log("Auth Options:", publicKeyCredentialRequestOptions);
 
         try {
+            console.log("Calling navigator.credentials.get...");
             const credential = await navigator.credentials.get({
                 publicKey: publicKeyCredentialRequestOptions,
             }) as PublicKeyCredential;
 
-            if (!credential) throw new Error("Authentication returned null.");
+            if (!credential) {
+                const err = new Error("Authentication returned null.");
+                console.groupEnd();
+                throw err;
+            }
 
-            console.log("[Passkey] Authenticated:", credential);
+            console.log("Authentication Successful:", credential);
 
-            return {
+            const response = credential.response as AuthenticatorAssertionResponse;
+            const result = {
                 id: credential.id,
                 rawId: this.bufferToBase64URL(credential.rawId),
                 response: {
-                    clientDataJSON: this.bufferToBase64URL((credential.response as AuthenticatorAssertionResponse).clientDataJSON),
-                    authenticatorData: this.bufferToBase64URL((credential.response as AuthenticatorAssertionResponse).authenticatorData),
-                    signature: this.bufferToBase64URL((credential.response as AuthenticatorAssertionResponse).signature),
-                    userHandle: (credential.response as AuthenticatorAssertionResponse).userHandle
-                        ? this.bufferToBase64URL((credential.response as AuthenticatorAssertionResponse).userHandle!)
+                    clientDataJSON: this.bufferToBase64URL(response.clientDataJSON),
+                    authenticatorData: this.bufferToBase64URL(response.authenticatorData),
+                    signature: this.bufferToBase64URL(response.signature),
+                    userHandle: response.userHandle
+                        ? this.bufferToBase64URL(response.userHandle)
                         : null
                 },
                 type: credential.type
             };
-        } catch (err) {
-            console.error("[Passkey] Authentication Failed:", err);
+
+            console.log("Final Auth Response Data:", result);
+            console.groupEnd();
+            return result;
+        } catch (err: any) {
+            console.error("Authentication Phase Failed:", err.name, err.message);
+            console.groupEnd();
             throw err;
         }
     }
 }
+

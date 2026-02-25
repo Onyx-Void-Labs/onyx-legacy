@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { SyncProvider } from "./contexts/SyncContext";
+import { VaultProvider } from "./contexts/VaultContext";
 
 // PREVENT RIGHT CLICK (CONTEXT MENU)
 document.addEventListener('contextmenu', (event) => {
@@ -13,7 +14,9 @@ document.addEventListener('contextmenu', (event) => {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <SyncProvider>
-      <App />
+      <VaultProvider>
+        <App />
+      </VaultProvider>
     </SyncProvider>
   </React.StrictMode>
 );

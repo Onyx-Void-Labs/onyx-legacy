@@ -14,7 +14,11 @@ function getFirstDayOfMonth(year: number, month: number) {
     return new Date(year, month, 1).getDay();
 }
 
-export default function CalendarView() {
+interface CalendarViewProps {
+    sidebarCollapsed?: boolean;
+}
+
+export default function CalendarView({ sidebarCollapsed = false }: CalendarViewProps) {
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -55,50 +59,52 @@ export default function CalendarView() {
     return (
         <div className="flex h-full overflow-hidden">
             {/* Calendar Sidebar (Agenda) */}
-            <div className="w-64 bg-zinc-900/60 flex flex-col border-r border-zinc-800/30 shrink-0">
-                <div className="h-12 px-4 flex items-center gap-2 border-b border-zinc-800/30 shrink-0">
-                    <Clock size={16} className="text-emerald-400" />
-                    <span className="text-sm font-semibold text-zinc-200">Today's Agenda</span>
-                </div>
+            <div className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${sidebarCollapsed ? 'w-0 opacity-0 border-none' : 'w-64 opacity-100 border-r border-zinc-800/30'}`}>
+                <div className="w-64 h-full flex flex-col bg-zinc-900/60">
+                    <div className="h-12 px-4 flex items-center gap-2 border-b border-zinc-800/30 shrink-0">
+                        <Clock size={16} className="text-emerald-400" />
+                        <span className="text-sm font-semibold text-zinc-200">Today's Agenda</span>
+                    </div>
 
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                    {/* Sample agenda items */}
-                    <div className="p-3 rounded-lg bg-emerald-500/8 border border-emerald-500/15 space-y-1">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                            <span className="text-xs text-emerald-400 font-medium">9:00 AM</span>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                        {/* Sample agenda items */}
+                        <div className="p-3 rounded-lg bg-emerald-500/8 border border-emerald-500/15 space-y-1">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                                <span className="text-xs text-emerald-400 font-medium">9:00 AM</span>
+                            </div>
+                            <span className="text-sm text-zinc-300 block pl-4">Team Standup</span>
                         </div>
-                        <span className="text-sm text-zinc-300 block pl-4">Team Standup</span>
-                    </div>
-                    <div className="p-3 rounded-lg bg-blue-500/8 border border-blue-500/15 space-y-1">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-blue-400" />
-                            <span className="text-xs text-blue-400 font-medium">2:00 PM</span>
+                        <div className="p-3 rounded-lg bg-blue-500/8 border border-blue-500/15 space-y-1">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-blue-400" />
+                                <span className="text-xs text-blue-400 font-medium">2:00 PM</span>
+                            </div>
+                            <span className="text-sm text-zinc-300 block pl-4">Design Review</span>
                         </div>
-                        <span className="text-sm text-zinc-300 block pl-4">Design Review</span>
-                    </div>
-                    <div className="p-3 rounded-lg bg-amber-500/8 border border-amber-500/15 space-y-1">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-amber-400" />
-                            <span className="text-xs text-amber-400 font-medium">5:30 PM</span>
+                        <div className="p-3 rounded-lg bg-amber-500/8 border border-amber-500/15 space-y-1">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-amber-400" />
+                                <span className="text-xs text-amber-400 font-medium">5:30 PM</span>
+                            </div>
+                            <span className="text-sm text-zinc-300 block pl-4">Gym Session</span>
                         </div>
-                        <span className="text-sm text-zinc-300 block pl-4">Gym Session</span>
                     </div>
-                </div>
 
-                {/* Mini To-Do */}
-                <div className="border-t border-zinc-800/30 p-3 shrink-0">
-                    <div className="flex items-center gap-2 mb-2">
-                        <ListTodo size={14} className="text-zinc-500" />
-                        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Tasks</span>
-                    </div>
-                    <div className="space-y-1.5">
-                        {['Finish onboarding flow', 'Review PRs', 'Update docs'].map((task, i) => (
-                            <label key={i} className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer group">
-                                <div className="w-4 h-4 rounded border border-zinc-700 group-hover:border-emerald-500/50 transition-colors shrink-0" />
-                                <span className="truncate">{task}</span>
-                            </label>
-                        ))}
+                    {/* Mini To-Do */}
+                    <div className="border-t border-zinc-800/30 p-3 shrink-0">
+                        <div className="flex items-center gap-2 mb-2">
+                            <ListTodo size={14} className="text-zinc-500" />
+                            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Tasks</span>
+                        </div>
+                        <div className="space-y-1.5">
+                            {['Finish onboarding flow', 'Review PRs', 'Update docs'].map((task, i) => (
+                                <label key={i} className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer group">
+                                    <div className="w-4 h-4 rounded border border-zinc-700 group-hover:border-emerald-500/50 transition-colors shrink-0" />
+                                    <span className="truncate">{task}</span>
+                                </label>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>

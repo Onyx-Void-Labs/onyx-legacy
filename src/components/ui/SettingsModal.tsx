@@ -806,7 +806,7 @@ function HelpTooltip({ text }: { text: string }) {
             <div className="w-3.5 h-3.5 rounded-full border border-zinc-800 flex items-center justify-center cursor-help transition-all group-hover:border-purple-500/50 group-hover:bg-purple-500/5 animate-pulse group-hover:animate-none">
                 <Info size={8} className="text-zinc-600 group-hover:text-purple-400" />
             </div>
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-[200] pointer-events-none scale-90 group-hover:scale-100">
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-200 pointer-events-none scale-90 group-hover:scale-100">
                 <div className="absolute bottom-[-4px] left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-900 border-r border-b border-zinc-800 rotate-45" />
                 <p className="text-[10px] text-zinc-300 leading-relaxed italic">{text}</p>
             </div>

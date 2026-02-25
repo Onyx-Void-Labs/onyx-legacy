@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import tailwindcss from '@tailwindcss/vite'
 import react from "@vitejs/plugin-react";
+import path from "path";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -9,6 +10,19 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   base: "./",
   plugins: [react(), tailwindcss()],
+
+  resolve: {
+    alias: {
+      "@/components": path.resolve(__dirname, "./src/components"),
+      "@/lib": path.resolve(__dirname, "./src/lib"),
+      "@/hooks": path.resolve(__dirname, "./src/hooks"),
+      "@/types": path.resolve(__dirname, "./src/types"),
+      "@/store": path.resolve(__dirname, "./src/store"),
+      "@/utils": path.resolve(__dirname, "./src/utils"),
+      "@/services": path.resolve(__dirname, "./src/services"),
+      "@/contexts": path.resolve(__dirname, "./src/contexts"),
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -27,8 +41,8 @@ export default defineConfig(async () => ({
       }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` and `apps/desktop`
+      ignored: ["**/src-tauri/**", "**/apps/desktop/**"],
     },
   },
 }));

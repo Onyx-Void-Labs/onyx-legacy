@@ -41,7 +41,7 @@ function Shortcut({ label, keys }: { label: string, keys: string[] }) {
             <span className="text-zinc-300 text-sm">{label}</span>
             <div className="flex items-center gap-1">
                 {keys.map((k, i) => (
-                    <kbd key={i} className="px-2 py-1 bg-zinc-800 rounded-md text-[10px] text-zinc-400 font-mono border border-white/5 min-w-[24px] text-center">
+                    <kbd key={i} className="px-2 py-1 bg-zinc-800 rounded-md text-[10px] text-zinc-400 font-mono border border-white/5 min-w-6 text-center">
                         {k === 'Mod' ? 'Ctrl' : k}
                     </kbd>
                 ))}

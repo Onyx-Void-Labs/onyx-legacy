@@ -17,7 +17,7 @@ export function useYjsStore(docId: string) {
         const provider = new IndexeddbPersistence(docId, doc);
 
         provider.on('synced', () => {
-            console.log(`[Yjs] Loaded ${docId} from IndexedDB`);
+
             setSynced(true);
         });
 

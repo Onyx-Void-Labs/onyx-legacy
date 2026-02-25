@@ -3,7 +3,7 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { FileMeta, SyncStatus } from '../types/sync';
+import { FileMeta, SyncStatus, NoteType } from '../types/sync';
 // import { v4 as uuidv4 } from 'uuid';
 
 const generateId = () => {
@@ -16,9 +16,13 @@ const generateId = () => {
 interface SyncContextType {
     files: FileMeta[];
     status: SyncStatus;
-    createFile: (title?: string) => string; // Returns ID
+    createFile: (title?: string, type?: NoteType) => string; // Returns ID
     deleteFile: (id: string) => void;
     updateFile: (id: string, updates: Partial<FileMeta>) => void;
+    softDeleteFile: (id: string) => void;
+    restoreFile: (id: string) => void;
+    archiveFile: (id: string) => void;
+    unarchiveFile: (id: string) => void;
     provider: HocuspocusProvider | null; // Exposed for debugging or advanced use
 }
 
@@ -47,18 +51,28 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         persistenceRef.current = new IndexeddbPersistence('onyx-filesystem', doc);
 
         persistenceRef.current.on('synced', () => {
-            console.log('[Sync] Filesystem loaded from local DB');
+
+            // Auto-purge: permanently delete notes trashed 30+ days ago
+            const filesMap = doc.getMap<FileMeta>('files');
+            const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            for (const [key, file] of filesMap.entries()) {
+                if (file.deletedAt && (now - file.deletedAt) > thirtyDays) {
+                    filesMap.delete(key);
+                }
+            }
 
             // DEMO MODE: Create Welcome Note if empty
             if (import.meta.env.VITE_DEMO_MODE) {
                 // Check if files map is empty
                 const filesMap = doc.getMap<FileMeta>('files');
                 if (filesMap.size === 0) {
-                    console.log('[Demo] Creating Welcome Note');
+
                     const id = generateId(); // Use local helper
                     const newFile: FileMeta = {
                         id,
                         title: 'Welcome to Onyx',
+                        type: 'note',
                         createdAt: Date.now(),
                         updatedAt: Date.now()
                     };
@@ -70,7 +84,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const notePersistence = new IndexeddbPersistence(`onyx-note-${id}`, noteDoc);
 
                     notePersistence.on('synced', () => {
-                        console.log('[Demo] Seeding Welcome Note content');
+
                         const contentText = noteDoc.getText('codemirror');
                         contentText.insert(0, '# Welcome to Onyx\n\nThis is a **live demo** of the Onyx encrypted workspace.\n\n- **Private**: Your data is stored locally in your browser.\n- **Secure**: No server sees your data in this demo.\n- **Transformed**: Experience the UI/UX of the desktop app right here.\n\nTry creating a new note or exploring the interface!');
 
@@ -145,11 +159,12 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, []);
 
-    const createFile = (title: string = 'Untitled Note') => {
+    const createFile = (title: string = 'Untitled Note', type: NoteType = 'note') => {
         const id = generateId();
         const newFile: FileMeta = {
             id,
             title,
+            type,
             createdAt: Date.now(),
             updatedAt: Date.now()
         };
@@ -165,6 +180,39 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         filesMap.delete(id);
     };
 
+    const softDeleteFile = (id: string) => {
+        const filesMap = docRef.current.getMap<FileMeta>('files');
+        const current = filesMap.get(id);
+        if (current) {
+            filesMap.set(id, { ...current, deletedAt: Date.now(), updatedAt: Date.now() });
+        }
+    };
+
+    const restoreFile = (id: string) => {
+        const filesMap = docRef.current.getMap<FileMeta>('files');
+        const current = filesMap.get(id);
+        if (current) {
+            const { deletedAt, ...rest } = current;
+            filesMap.set(id, { ...rest, updatedAt: Date.now() });
+        }
+    };
+
+    const archiveFile = (id: string) => {
+        const filesMap = docRef.current.getMap<FileMeta>('files');
+        const current = filesMap.get(id);
+        if (current) {
+            filesMap.set(id, { ...current, isArchived: true, updatedAt: Date.now() });
+        }
+    };
+
+    const unarchiveFile = (id: string) => {
+        const filesMap = docRef.current.getMap<FileMeta>('files');
+        const current = filesMap.get(id);
+        if (current) {
+            filesMap.set(id, { ...current, isArchived: false, updatedAt: Date.now() });
+        }
+    };
+
     const updateFile = (id: string, updates: Partial<FileMeta>) => {
         const filesMap = docRef.current.getMap<FileMeta>('files');
         const current = filesMap.get(id);
@@ -174,7 +222,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     return (
-        <SyncContext.Provider value={{ files, status, createFile, deleteFile, updateFile, provider: providerRef.current }}>
+        <SyncContext.Provider value={{ files, status, createFile, deleteFile, updateFile, softDeleteFile, restoreFile, archiveFile, unarchiveFile, provider: providerRef.current }}>
             {children}
         </SyncContext.Provider>
     );

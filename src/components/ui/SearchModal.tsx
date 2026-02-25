@@ -78,11 +78,11 @@ export default function SearchModal({ isOpen, onClose, notes, onSelectNote }: Se
 
     return (
         <div
-            className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-100 flex items-start justify-center pt-[15vh] bg-black/60 backdrop-blur-sm"
             onClick={onClose}
         >
             <div
-                className="w-[500px] bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl overflow-hidden"
+                className="w-125 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Search Input */}
