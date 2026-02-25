@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
     BookOpen,
     RotateCcw,
     ChevronRight,
+    ChevronDown,
     Sparkles,
     Plus,
     Trash2,
@@ -20,8 +22,7 @@ import {
     Zap,
     Target,
     Trophy,
-    FlipHorizontal,
-    Link2,
+    FolderOpen,
 } from 'lucide-react';
 import {
     getDueCards,
@@ -32,7 +33,13 @@ import {
     deleteCard,
     getSessionStats,
     getRetentionForecast,
+    getAllCollections,
+    getAllSets,
+    createCollection,
+    createSet,
     type Flashcard,
+    type FlashcardCollection,
+    type FlashcardSet,
     type Rating,
     type CardType,
 } from '../../lib/flashcards';
@@ -1310,6 +1317,45 @@ function InlineCardEditor({
 }
 
 /* ═══════════════════════════════════════════════════════════
+   CARD EDITOR MODAL — portal overlay (BUG 4)
+   ═══════════════════════════════════════════════════════════ */
+
+function CardEditorModal({
+    card,
+    onSave,
+    onCancel,
+}: {
+    card: Flashcard;
+    onSave: (updated: Flashcard) => void;
+    onCancel: () => void;
+}) {
+    // Close on Escape
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onCancel();
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [onCancel]);
+
+    return createPortal(
+        <div
+            className="fixed inset-0 z-[99999] flex items-center justify-center"
+            onClick={onCancel}
+        >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <div
+                className="relative w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto rounded-xl"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <InlineCardEditor card={card} onSave={onSave} onCancel={onCancel} />
+            </div>
+        </div>,
+        document.body,
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════ */
 
@@ -1359,11 +1405,28 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
     // Retention forecast
     const [forecast, setForecast] = useState<number[]>([]);
 
+    // Collection/Set state (BUG 2)
+    const [collections, setCollections] = useState<FlashcardCollection[]>([]);
+    const [sets, setSets] = useState<FlashcardSet[]>([]);
+    const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
+    const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
+    const [showCollections, setShowCollections] = useState(false);
+    const [newCollectionName, setNewCollectionName] = useState('');
+    const [newSetName, setNewSetName] = useState('');
+    const [addingSetForCollection, setAddingSetForCollection] = useState<string | null>(null);
+
+    // Quick-add open in menu (BUG 1)
+    const [menuQuickAdd, setMenuQuickAdd] = useState(false);
+
     const refresh = useCallback(async () => {
         const due = await getDueCards();
         const all = await getAllCards();
+        const cols = await getAllCollections();
+        const allSets = await getAllSets();
         setDueCards(due);
         setAllCards(all);
+        setCollections(cols);
+        setSets(allSets);
     }, []);
 
     useEffect(() => {
@@ -1382,11 +1445,17 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
         if (deckFilter !== 'all') {
             cards = cards.filter((c) => (c.deck || 'Uncategorized') === deckFilter);
         }
+        if (selectedCollectionId) {
+            cards = cards.filter((c) => c.collectionId === selectedCollectionId);
+        }
+        if (selectedSetId) {
+            cards = cards.filter((c) => c.setId === selectedSetId);
+        }
         if (interleave) {
             cards = shuffleArray(cards);
         }
         return cards;
-    }, [dueCards, deckFilter, interleave]);
+    }, [dueCards, deckFilter, selectedCollectionId, selectedSetId, interleave]);
 
     const currentCard = filteredDue[currentIdx];
 
@@ -1488,7 +1557,7 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
         const opts: Partial<
             Pick<
                 Flashcard,
-                'cardType' | 'hint' | 'options' | 'correctIndex' | 'matchPairs' | 'clozeIndex' | 'deck' | 'tags' | 'sentence' | 'blanks'
+                'cardType' | 'hint' | 'options' | 'correctIndex' | 'matchPairs' | 'clozeIndex' | 'deck' | 'tags' | 'sentence' | 'blanks' | 'collectionId' | 'setId'
             >
         > = {
             cardType: newType,
@@ -1496,6 +1565,8 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
 
         if (newHint.trim()) opts.hint = newHint.trim();
         if (newDeck.trim()) opts.deck = newDeck.trim();
+        if (selectedCollectionId) opts.collectionId = selectedCollectionId;
+        if (selectedSetId) opts.setId = selectedSetId;
 
         if (newType === 'basic') {
             if (!newFront.trim() || !newBack.trim()) return;
@@ -1579,6 +1650,30 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
         },
         [refresh],
     );
+
+    // Collection/Set handlers (BUG 2)
+    const handleCreateCollection = useCallback(
+        async () => {
+            if (!newCollectionName.trim()) return;
+            await createCollection(newCollectionName.trim());
+            setNewCollectionName('');
+            refresh();
+        },
+        [newCollectionName, refresh],
+    );
+
+    const handleCreateSet = useCallback(
+        async (collectionId: string) => {
+            if (!newSetName.trim()) return;
+            await createSet(collectionId, newSetName.trim());
+            setNewSetName('');
+            setAddingSetForCollection(null);
+            refresh();
+        },
+        [newSetName, refresh],
+    );
+
+
 
     /* ═══════════════════════════════════════════════════════
        RENDER: Results Mode
@@ -1715,6 +1810,61 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
                     {/* Retention forecast chart */}
                     {forecast.length > 0 && <RetentionForecastChart forecast={forecast} />}
 
+                    {/* Card-by-card review (BUG 5) */}
+                    {sessionHistory.length > 0 && (
+                        <div className="mb-6 mt-6">
+                            <p className="text-[11px] text-zinc-500 mb-3 flex items-center gap-1.5">
+                                <Target size={12} className="text-violet-400" />
+                                Card-by-Card Review
+                            </p>
+                            <div className="space-y-1 max-h-64 overflow-y-auto">
+                                {sessionHistory.map((entry, i) => {
+                                    const ratingColors: Record<Rating, string> = {
+                                        again: 'text-red-400 bg-red-900/30',
+                                        hard: 'text-amber-400 bg-amber-900/30',
+                                        good: 'text-emerald-400 bg-emerald-900/30',
+                                        easy: 'text-sky-400 bg-sky-900/30',
+                                    };
+                                    return (
+                                        <div
+                                            key={`${entry.card.id}-${i}`}
+                                            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-zinc-800/30"
+                                        >
+                                            <span className="text-[10px] text-zinc-600 font-mono w-5 shrink-0 text-right">
+                                                {i + 1}
+                                            </span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-[12px] text-zinc-300 truncate">
+                                                    {entry.card.front}
+                                                </p>
+                                                {entry.card.back && (
+                                                    <p className="text-[10px] text-zinc-600 truncate">
+                                                        {entry.card.back}
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <span
+                                                className={`text-[9px] px-1.5 py-0.5 rounded shrink-0 ${
+                                                    TYPE_TAG_COLORS[entry.card.cardType] ??
+                                                    TYPE_TAG_COLORS.basic
+                                                }`}
+                                            >
+                                                {entry.card.cardType || 'basic'}
+                                            </span>
+                                            <span
+                                                className={`text-[10px] px-2 py-0.5 rounded-md font-medium shrink-0 ${
+                                                    ratingColors[entry.rating]
+                                                }`}
+                                            >
+                                                {entry.rating}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Action buttons */}
                     <div className="flex gap-3 mt-8">
                         {missedCards.length > 0 && (
@@ -1805,6 +1955,159 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
                         </div>
                     )}
 
+                    {/* Collection/Set Hierarchy (BUG 2) */}
+                    <div className="mb-4">
+                        <button
+                            onClick={() => setShowCollections(!showCollections)}
+                            className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer mb-2"
+                        >
+                            <FolderOpen size={12} />
+                            <span>Collections & Sets</span>
+                            {showCollections ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                        </button>
+
+                        {showCollections && (
+                            <div className="space-y-2 ml-5">
+                                {/* All cards option */}
+                                <button
+                                    onClick={() => {
+                                        setSelectedCollectionId(null);
+                                        setSelectedSetId(null);
+                                    }}
+                                    className={`w-full text-left px-3 py-1.5 text-[11px] rounded-lg transition-colors cursor-pointer ${
+                                        !selectedCollectionId
+                                            ? 'bg-violet-500/20 text-violet-300'
+                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-800/30'
+                                    }`}
+                                >
+                                    All Cards
+                                </button>
+
+                                {/* Collections */}
+                                {collections.map((col) => {
+                                    const colSets = sets.filter((s) => s.collectionId === col.id);
+                                    const colCards = allCards.filter((c) => c.collectionId === col.id);
+                                    const colDue = dueCards.filter((c) => c.collectionId === col.id);
+                                    const isSelected = selectedCollectionId === col.id && !selectedSetId;
+
+                                    return (
+                                        <div key={col.id}>
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedCollectionId(col.id);
+                                                    setSelectedSetId(null);
+                                                }}
+                                                className={`w-full text-left px-3 py-1.5 text-[11px] rounded-lg transition-colors cursor-pointer flex items-center justify-between ${
+                                                    isSelected
+                                                        ? 'bg-violet-500/20 text-violet-300'
+                                                        : 'text-zinc-400 hover:text-zinc-300 bg-zinc-800/30'
+                                                }`}
+                                            >
+                                                <span className="flex items-center gap-1.5">
+                                                    <FolderOpen size={10} />
+                                                    {col.name}
+                                                </span>
+                                                <span className="text-[9px] text-zinc-600">
+                                                    {colDue.length}/{colCards.length}
+                                                </span>
+                                            </button>
+
+                                            {/* Sets within collection */}
+                                            {colSets.length > 0 && (
+                                                <div className="ml-4 mt-1 space-y-1">
+                                                    {colSets.map((s) => {
+                                                        const setCards = allCards.filter((c) => c.setId === s.id);
+                                                        const setDue = dueCards.filter((c) => c.setId === s.id);
+                                                        const isSetSelected = selectedSetId === s.id;
+
+                                                        return (
+                                                            <button
+                                                                key={s.id}
+                                                                onClick={() => {
+                                                                    setSelectedCollectionId(col.id);
+                                                                    setSelectedSetId(s.id);
+                                                                }}
+                                                                className={`w-full text-left px-2.5 py-1 text-[10px] rounded-md transition-colors cursor-pointer flex items-center justify-between ${
+                                                                    isSetSelected
+                                                                        ? 'bg-violet-500/15 text-violet-300'
+                                                                        : 'text-zinc-500 hover:text-zinc-400 bg-zinc-800/20'
+                                                                }`}
+                                                            >
+                                                                <span className="flex items-center gap-1.5">
+                                                                    <Layers size={9} />
+                                                                    {s.name}
+                                                                </span>
+                                                                <span className="text-[9px] text-zinc-600">
+                                                                    {setDue.length}/{setCards.length}
+                                                                </span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            {/* Add set button */}
+                                            {addingSetForCollection === col.id ? (
+                                                <div className="ml-4 mt-1 flex items-center gap-1">
+                                                    <input
+                                                        value={newSetName}
+                                                        onChange={(e) => setNewSetName(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') handleCreateSet(col.id);
+                                                            if (e.key === 'Escape') setAddingSetForCollection(null);
+                                                        }}
+                                                        placeholder="Set name..."
+                                                        className="flex-1 bg-zinc-800/60 text-[10px] text-zinc-200 rounded-md px-2 py-1 outline-none border border-transparent focus:border-violet-500/30 placeholder:text-zinc-600"
+                                                        autoFocus
+                                                    />
+                                                    <button
+                                                        onClick={() => handleCreateSet(col.id)}
+                                                        className="text-violet-400 hover:text-violet-300 cursor-pointer"
+                                                    >
+                                                        <Plus size={10} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setAddingSetForCollection(null)}
+                                                        className="text-zinc-600 hover:text-zinc-400 cursor-pointer"
+                                                    >
+                                                        <X size={10} />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => setAddingSetForCollection(col.id)}
+                                                    className="ml-4 mt-1 flex items-center gap-1 text-[9px] text-zinc-600 hover:text-violet-400 transition-colors cursor-pointer"
+                                                >
+                                                    <Plus size={8} /> Add set
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+
+                                {/* Create new collection */}
+                                <div className="flex items-center gap-1 mt-2">
+                                    <input
+                                        value={newCollectionName}
+                                        onChange={(e) => setNewCollectionName(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleCreateCollection();
+                                        }}
+                                        placeholder="New collection..."
+                                        className="flex-1 bg-zinc-800/60 text-[10px] text-zinc-200 rounded-md px-2 py-1.5 outline-none border border-transparent focus:border-violet-500/30 placeholder:text-zinc-600"
+                                    />
+                                    <button
+                                        onClick={handleCreateCollection}
+                                        disabled={!newCollectionName.trim()}
+                                        className="text-violet-400 hover:text-violet-300 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+                                    >
+                                        <Plus size={12} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Interleave toggle */}
                     <div className="flex items-center gap-4 mb-6">
                         <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
@@ -1833,54 +2136,168 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
                         <ChevronRight size={14} className="text-violet-400/50 ml-auto" />
                     </button>
 
-                    {/* Manage cards button */}
+                    {/* Quick-add card (BUG 1) */}
                     <button
-                        onClick={() => setMode('manage')}
-                        className="w-full flex items-center gap-3 px-4 py-3 mb-8 rounded-xl border border-zinc-800 hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                        onClick={() => setMenuQuickAdd(!menuQuickAdd)}
+                        className="w-full flex items-center gap-3 px-4 py-3 mb-2 rounded-xl border border-zinc-800 hover:bg-zinc-800/40 transition-colors cursor-pointer group"
                     >
                         <Plus size={16} className="text-zinc-400" />
                         <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
-                            Add & manage cards
+                            Quick add card
+                        </span>
+                        {menuQuickAdd ? (
+                            <ChevronDown size={14} className="text-zinc-600 ml-auto" />
+                        ) : (
+                            <ChevronRight size={14} className="text-zinc-600 ml-auto" />
+                        )}
+                    </button>
+
+                    {menuQuickAdd && (
+                        <div className="bg-zinc-800/40 rounded-xl p-4 mb-4 space-y-3">
+                            {/* Card type selector with tooltips */}
+                            <div className="flex items-center gap-1 flex-wrap">
+                                {CARD_TYPE_OPTIONS.map((opt) => (
+                                    <div key={opt.value} className="relative group/tip">
+                                        <button
+                                            onClick={() => {
+                                                setNewType(opt.value);
+                                                resetCreationForm();
+                                            }}
+                                            className={`px-2.5 py-1 text-[11px] rounded-lg transition-colors cursor-pointer ${
+                                                newType === opt.value
+                                                    ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
+                                                    : 'text-zinc-500 hover:text-zinc-300 bg-zinc-800/30 border border-transparent'
+                                            }`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2.5 rounded-lg bg-zinc-900 border border-zinc-700/50 shadow-xl text-[10px] text-zinc-400 leading-relaxed opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-200 z-50">
+                                            <Info size={10} className="inline mr-1 text-violet-400 shrink-0" />
+                                            {SCIENCE_FACTS[opt.value]}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Type-specific forms */}
+                            {newType === 'basic' && (
+                                <BasicCreationForm
+                                    front={newFront}
+                                    setFront={setNewFront}
+                                    back={newBack}
+                                    setBack={setNewBack}
+                                />
+                            )}
+                            {newType === 'fill-blank' && (
+                                <FillBlankCreationForm
+                                    sentence={newSentence}
+                                    setSentence={setNewSentence}
+                                    blanks={newBlanks}
+                                    setBlanks={setNewBlanks}
+                                />
+                            )}
+                            {newType === 'mcq' && (
+                                <MCQCreationForm
+                                    question={newFront}
+                                    setQuestion={setNewFront}
+                                    options={newMcqOptions}
+                                    setOptions={setNewMcqOptions}
+                                    correctIndex={newMcqCorrect}
+                                    setCorrectIndex={setNewMcqCorrect}
+                                />
+                            )}
+                            {newType === 'matching' && (
+                                <MatchingCreationForm pairs={newMatchPairs} setPairs={setNewMatchPairs} />
+                            )}
+                            {newType === 'cloze' && (
+                                <ClozeCreationForm
+                                    sentence={newSentence}
+                                    setSentence={setNewSentence}
+                                    blanks={newBlanks}
+                                    setBlanks={setNewBlanks}
+                                    syntaxMode={newClozeSyntax}
+                                    setSyntaxMode={setNewClozeSyntax}
+                                    rawSyntax={newRawSyntax}
+                                    setRawSyntax={setNewRawSyntax}
+                                />
+                            )}
+
+                            {/* Common fields: hint + deck */}
+                            <div className="flex gap-2">
+                                <input
+                                    value={newHint}
+                                    onChange={(e) => setNewHint(e.target.value)}
+                                    placeholder="Hint (optional)..."
+                                    className="flex-1 bg-zinc-800/60 text-sm text-zinc-200 rounded-lg px-3 py-2 outline-none border border-transparent focus:border-violet-500/30 placeholder:text-zinc-600"
+                                />
+                                <input
+                                    value={newDeck}
+                                    onChange={(e) => setNewDeck(e.target.value)}
+                                    placeholder="Deck..."
+                                    className="w-32 bg-zinc-800/60 text-sm text-zinc-200 rounded-lg px-3 py-2 outline-none border border-transparent focus:border-violet-500/30 placeholder:text-zinc-600"
+                                />
+                            </div>
+
+                            <button
+                                onClick={handleAddCard}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-colors cursor-pointer"
+                            >
+                                <Plus size={12} />
+                                Add Card
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Manage cards button */}
+                    <button
+                        onClick={() => setMode('manage')}
+                        className="w-full flex items-center gap-3 px-4 py-3 mb-4 rounded-xl border border-zinc-800 hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                    >
+                        <Pencil size={16} className="text-zinc-400" />
+                        <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
+                            Manage all cards
                         </span>
                         <ChevronRight size={14} className="text-zinc-600 ml-auto" />
                     </button>
 
-                    {/* Card type syntax help */}
-                    <div className="text-[11px] text-zinc-600 leading-relaxed space-y-1">
-                        <p>
-                            <strong className="text-zinc-500">Syntax:</strong>
-                        </p>
-                        <p>
-                            <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">Q:</code>/
-                            <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">A:</code> or{' '}
-                            <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
-                                front :: back
-                            </code>{' '}
-                            -- Basic
-                        </p>
-                        <p>
-                            <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
-                                {'The {{answer}} is correct'}
-                            </code>{' '}
-                            -- Fill-in-Blank
-                        </p>
-                        <p>
-                            <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
-                                {'{{c1::word}}'}
-                            </code>{' '}
-                            -- Cloze
-                        </p>
-                        <p>
-                            <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
-                                MCQ: question
-                            </code>{' '}
-                            +{' '}
-                            <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
-                                a) b) c) Answer: a
-                            </code>{' '}
-                            -- MCQ
-                        </p>
-                    </div>
+                    {/* Card type syntax help (collapsible) */}
+                    <details className="text-[11px] text-zinc-600 leading-relaxed">
+                        <summary className="cursor-pointer text-zinc-500 hover:text-zinc-400 mb-2 select-none">
+                            Card syntax reference
+                        </summary>
+                        <div className="space-y-1 ml-2">
+                            <p>
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">Q:</code>/
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">A:</code> or{' '}
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
+                                    front :: back
+                                </code>{' '}
+                                — Basic
+                            </p>
+                            <p>
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
+                                    {'The {{answer}} is correct'}
+                                </code>{' '}
+                                — Fill-in-Blank
+                            </p>
+                            <p>
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
+                                    {'{{c1::word}}'}
+                                </code>{' '}
+                                — Cloze
+                            </p>
+                            <p>
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
+                                    MCQ: question
+                                </code>{' '}
+                                +{' '}
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400">
+                                    a) b) c) Answer: a
+                                </code>{' '}
+                                — MCQ
+                            </p>
+                        </div>
+                    </details>
                 </div>
             </div>
         );
@@ -2051,23 +2468,28 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
 
                 {/* ── Add card form ── */}
                 <div className="bg-zinc-800/40 rounded-xl p-4 mb-6 space-y-3">
-                    {/* Card type selector */}
+                    {/* Card type selector with tooltips (BUG 3) */}
                     <div className="flex items-center gap-1 flex-wrap">
                         {CARD_TYPE_OPTIONS.map((opt) => (
-                            <button
-                                key={opt.value}
-                                onClick={() => {
-                                    setNewType(opt.value);
-                                    resetCreationForm();
-                                }}
-                                className={`px-2.5 py-1 text-[11px] rounded-lg transition-colors cursor-pointer ${
-                                    newType === opt.value
-                                        ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
-                                        : 'text-zinc-500 hover:text-zinc-300 bg-zinc-800/30 border border-transparent'
-                                }`}
-                            >
-                                {opt.label}
-                            </button>
+                            <div key={opt.value} className="relative group/tip">
+                                <button
+                                    onClick={() => {
+                                        setNewType(opt.value);
+                                        resetCreationForm();
+                                    }}
+                                    className={`px-2.5 py-1 text-[11px] rounded-lg transition-colors cursor-pointer ${
+                                        newType === opt.value
+                                            ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
+                                            : 'text-zinc-500 hover:text-zinc-300 bg-zinc-800/30 border border-transparent'
+                                    }`}
+                                >
+                                    {opt.label}
+                                </button>
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2.5 rounded-lg bg-zinc-900 border border-zinc-700/50 shadow-xl text-[10px] text-zinc-400 leading-relaxed opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity duration-200 z-50">
+                                    <Info size={10} className="inline mr-1 text-violet-400 shrink-0" />
+                                    {SCIENCE_FACTS[opt.value]}
+                                </div>
+                            </div>
                         ))}
                     </div>
 
@@ -2209,19 +2631,23 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
                                     <Trash2 size={12} />
                                 </button>
                             </div>
-
-                            {/* Inline edit form */}
-                            {editingCardId === card.id && (
-                                <InlineCardEditor
-                                    card={card}
-                                    onSave={handleEditSave}
-                                    onCancel={() => setEditingCardId(null)}
-                                />
-                            )}
                         </div>
                     ))}
                 </div>
             </div>
+
+            {/* Edit card modal (BUG 4) */}
+            {editingCardId && (() => {
+                const editCard = allCards.find((c) => c.id === editingCardId);
+                if (!editCard) return null;
+                return (
+                    <CardEditorModal
+                        card={editCard}
+                        onSave={handleEditSave}
+                        onCancel={() => setEditingCardId(null)}
+                    />
+                );
+            })()}
         </div>
     );
 }

@@ -1,22 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Link2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
-import type { FileMeta, NoteType } from '../../types/sync';
-
-const TYPE_ICON: Record<NoteType, string> = {
-    note: '📄',
-    topic: '🗂',
-    idea: '💡',
-    task: '✅',
-    resource: '🔗',
-    journal: '📅',
-    study: '📚',
-};
+import type { NoteType } from '../../types/sync';
+import { NoteTypeIcon } from '../../lib/noteIcons';
 
 interface Backlink {
     noteId: string;
     noteTitle: string;
     noteType: NoteType;
     context: string;
+    updatedAt?: number;
 }
 
 interface BacklinksPanelProps {
@@ -26,17 +19,11 @@ interface BacklinksPanelProps {
 
 export default function BacklinksPanel({ currentNoteId, onOpenNote }: BacklinksPanelProps) {
     const { files } = useSync();
+    const [collapsed, setCollapsed] = useState(false);
 
-    // Scan all notes for NoteLink nodes referencing current note.
-    // Since note content lives in per-note Yjs docs we can't deeply inspect
-    // content from here without loading every doc. Instead we use a lightweight
-    // approach: look for notes that store link metadata in properties, or
-    // check IndexedDB. For now we rely on a global event bus populated by
-    // the editor when notes are opened. As a fallback we surface any note
-    // whose title contains a '+' reference to the current note's title.
     const currentNote = useMemo(
         () => files.find((f) => f.id === currentNoteId),
-        [files, currentNoteId]
+        [files, currentNoteId],
     );
 
     const backlinks = useMemo<Backlink[]>(() => {
@@ -57,62 +44,112 @@ export default function BacklinksPanel({ currentNoteId, onOpenNote }: BacklinksP
                     noteTitle: file.title || 'Untitled',
                     noteType: file.type || 'note',
                     context: `Links to "${currentNote.title || 'Untitled'}"`,
+                    updatedAt: file.updatedAt,
                 });
+                continue;
             }
 
-            // Also check if the note's title references the current note with +prefix
+            // Check if the note's title references the current note with +prefix
             if (currentTitle && file.title?.toLowerCase().includes(`+${currentTitle}`)) {
-                if (!results.find((r) => r.noteId === file.id)) {
+                results.push({
+                    noteId: file.id,
+                    noteTitle: file.title || 'Untitled',
+                    noteType: file.type || 'note',
+                    context: `Mentions "+${currentNote.title}"`,
+                    updatedAt: file.updatedAt,
+                });
+                continue;
+            }
+
+            // Check for shared tags
+            if (currentNote.tags && currentNote.tags.length > 0 && file.tags) {
+                const shared = currentNote.tags.filter((t) => file.tags!.includes(t));
+                if (shared.length > 0) {
                     results.push({
                         noteId: file.id,
                         noteTitle: file.title || 'Untitled',
                         noteType: file.type || 'note',
-                        context: `Mentions "+${currentNote.title}"`,
+                        context: `Shares tags: ${shared.map((t) => `#${t}`).join(', ')}`,
+                        updatedAt: file.updatedAt,
                     });
                 }
             }
         }
 
-        return results;
+        // Sort by most recently updated
+        return results.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     }, [files, currentNoteId, currentNote]);
 
-    if (backlinks.length === 0) return null;
+    const formatDate = (ts?: number) => {
+        if (!ts) return '';
+        const d = new Date(ts);
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    };
 
     return (
         <div className="px-12 pb-8">
             <div className="border-t border-zinc-800 pt-4 mt-4">
-                <div className="flex items-center gap-2 mb-3">
-                    <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">
-                        Linked from
+                <button
+                    onClick={() => setCollapsed(!collapsed)}
+                    className="flex items-center gap-2 mb-3 cursor-pointer group"
+                >
+                    {collapsed ? (
+                        <ChevronRight size={10} className="text-zinc-600" />
+                    ) : (
+                        <ChevronDown size={10} className="text-zinc-600" />
+                    )}
+                    <Link2 size={10} className="text-zinc-600" />
+                    <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider group-hover:text-zinc-500 transition-colors">
+                        Backlinks
                     </span>
                     <span className="text-[10px] font-mono text-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 rounded">
-                        {backlinks.length} {backlinks.length === 1 ? 'note' : 'notes'}
+                        {backlinks.length}
                     </span>
-                </div>
-                <div className="space-y-1.5">
-                    {backlinks.map((bl) => (
-                        <button
-                            key={bl.noteId}
-                            onClick={() => onOpenNote(bl.noteId)}
-                            className="w-full flex items-start gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-150 hover:bg-violet-500/8 group cursor-pointer"
-                        >
-                            <span className="text-sm shrink-0 mt-0.5">{TYPE_ICON[bl.noteType]}</span>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs font-medium text-zinc-200 truncate">
-                                        {bl.noteTitle}
-                                    </span>
-                                    <span className="text-[10px] text-violet-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                        → open
-                                    </span>
-                                </div>
-                                <p className="text-[11px] text-zinc-500 truncate mt-0.5">
-                                    {bl.context}
-                                </p>
+                </button>
+
+                {!collapsed && (
+                    <>
+                        {backlinks.length === 0 ? (
+                            <p className="text-[11px] text-zinc-600 italic pl-5">
+                                No notes link to this one yet. Use{' '}
+                                <code className="px-1 py-0.5 bg-zinc-800/60 rounded text-violet-400 text-[10px]">+</code>{' '}
+                                in other notes to create links.
+                            </p>
+                        ) : (
+                            <div className="space-y-1.5">
+                                {backlinks.map((bl) => (
+                                    <button
+                                        key={bl.noteId}
+                                        onClick={() => onOpenNote(bl.noteId)}
+                                        className="w-full flex items-start gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-150 hover:bg-violet-500/8 group cursor-pointer"
+                                    >
+                                        <span className="text-sm shrink-0 mt-0.5">
+                                            <NoteTypeIcon type={bl.noteType} size={14} />
+                                        </span>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-medium text-zinc-200 truncate">
+                                                    {bl.noteTitle}
+                                                </span>
+                                                {bl.updatedAt && (
+                                                    <span className="text-[9px] text-zinc-600 shrink-0">
+                                                        {formatDate(bl.updatedAt)}
+                                                    </span>
+                                                )}
+                                                <span className="text-[10px] text-violet-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                                    → open
+                                                </span>
+                                            </div>
+                                            <p className="text-[11px] text-zinc-500 truncate mt-0.5">
+                                                {bl.context}
+                                            </p>
+                                        </div>
+                                    </button>
+                                ))}
                             </div>
-                        </button>
-                    ))}
-                </div>
+                        )}
+                    </>
+                )}
             </div>
         </div>
     );

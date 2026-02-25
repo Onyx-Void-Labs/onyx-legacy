@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { Editor } from '@tiptap/core';
-import { FileText, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useSync } from '../../../contexts/SyncContext';
+import { NoteTypeIcon } from '../../../lib/noteIcons';
 
 interface NoteLinkSuggestionProps {
     editor: Editor;
@@ -160,12 +161,6 @@ export const NoteLinkSuggestion: React.FC<NoteLinkSuggestionProps> = ({ editor }
 
             {filteredNotes.map((note, index) => {
                 const isSelected = index === selectedIndex;
-                const typeEmoji =
-                    note.type === 'topic' ? '🗂' :
-                    note.type === 'idea' ? '💡' :
-                    note.type === 'task' ? '✅' :
-                    note.type === 'resource' ? '🔗' :
-                    note.type === 'journal' ? '📅' : '';
 
                 return (
                     <button
@@ -183,11 +178,7 @@ export const NoteLinkSuggestion: React.FC<NoteLinkSuggestionProps> = ({ editor }
                                 isSelected ? 'bg-purple-500/20 text-purple-400' : 'bg-zinc-800 text-zinc-400'
                             }`}
                         >
-                            {typeEmoji ? (
-                                <span className="text-xs">{typeEmoji}</span>
-                            ) : (
-                                <FileText size={14} />
-                            )}
+                            <NoteTypeIcon type={note.type} size={14} />
                         </div>
                         <div className="min-w-0 flex-1">
                             <div className="text-sm font-medium truncate">

@@ -216,6 +216,105 @@ const projectPlan: JSONContent = {
     ],
 };
 
+const cornellNotes: JSONContent = {
+    type: 'doc',
+    content: [
+        heading(1, 'Cornell Notes — [Topic]'),
+        boldParagraph('Subject: ', ' | Date:  | Lecturer: '),
+        paragraph(),
+        heading(2, 'Cue Column'),
+        bulletList(['Key question 1?', 'Key question 2?', 'Key question 3?']),
+        paragraph(),
+        heading(2, 'Notes'),
+        paragraph('Write main lecture notes here. Focus on concepts, facts, and details.'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Summary'),
+        paragraph('Summarise the main points in 2–3 sentences from memory.'),
+    ],
+};
+
+const weeklyPlanner: JSONContent = {
+    type: 'doc',
+    content: [
+        heading(1, 'Weekly Planner — Week of [Date]'),
+        paragraph(),
+        heading(2, 'Monday'),
+        taskList(['', '']),
+        heading(2, 'Tuesday'),
+        taskList(['', '']),
+        heading(2, 'Wednesday'),
+        taskList(['', '']),
+        heading(2, 'Thursday'),
+        taskList(['', '']),
+        heading(2, 'Friday'),
+        taskList(['', '']),
+        heading(2, 'Saturday'),
+        taskList(['', '']),
+        heading(2, 'Sunday'),
+        taskList(['', '']),
+        paragraph(),
+        heading(2, 'Weekly Goals'),
+        bulletList(['', '', '']),
+        heading(2, 'Reflection'),
+        paragraph(),
+    ],
+};
+
+const researchPaper: JSONContent = {
+    type: 'doc',
+    content: [
+        heading(1, '[Research Title]'),
+        boldParagraph('Authors: '),
+        boldParagraph('Keywords: '),
+        boldParagraph('Date: '),
+        paragraph(),
+        heading(2, 'Abstract'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Introduction'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Literature Review'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Methodology'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Results'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Discussion'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Conclusion'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'References'),
+        orderedList(['']),
+    ],
+};
+
+const dailyJournal: JSONContent = {
+    type: 'doc',
+    content: [
+        heading(1, 'Journal — [Date]'),
+        paragraph(),
+        heading(2, 'Morning'),
+        boldParagraph('Mood: '),
+        boldParagraph('Intention for the day: '),
+        paragraph(),
+        heading(2, 'Gratitude'),
+        bulletList(['', '', '']),
+        paragraph(),
+        heading(2, 'Reflections'),
+        paragraph(),
+        paragraph(),
+        heading(2, 'Tomorrow'),
+        taskList(['', '']),
+    ],
+};
+
 const TEMPLATES: Record<TemplateType, JSONContent> = {
     'lecture-notes': lectureNotes,
     'lab-report': labReport,
@@ -223,6 +322,10 @@ const TEMPLATES: Record<TemplateType, JSONContent> = {
     'meeting-notes': meetingNotes,
     'study-guide': studyGuide,
     'project-plan': projectPlan,
+    'cornell-notes': cornellNotes,
+    'weekly-planner': weeklyPlanner,
+    'research-paper': researchPaper,
+    'daily-journal': dailyJournal,
 };
 
 export function getTemplate(type: TemplateType): JSONContent {
@@ -236,4 +339,8 @@ export const TEMPLATE_LIST: { type: TemplateType; label: string; icon: string }[
     { type: 'meeting-notes', label: 'Meeting Notes', icon: '📅' },
     { type: 'study-guide', label: 'Study Guide', icon: '🃏' },
     { type: 'project-plan', label: 'Project Plan', icon: '✅' },
+    { type: 'cornell-notes', label: 'Cornell Notes', icon: '📋' },
+    { type: 'weekly-planner', label: 'Weekly Planner', icon: '📆' },
+    { type: 'research-paper', label: 'Research Paper', icon: '🔍' },
+    { type: 'daily-journal', label: 'Daily Journal', icon: '📓' },
 ];

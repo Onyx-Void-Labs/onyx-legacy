@@ -9,16 +9,14 @@ import {
     Columns3,
     ArrowRight,
     ChevronDown,
+    ChevronRight,
     FileText,
     Clock,
+    ArrowUpDown,
 } from 'lucide-react';
 import { useSync } from '../../../contexts/SyncContext';
-import type { FileMeta, NoteType } from '../../../types/sync';
-
-const TYPE_ICON: Record<NoteType, string> = {
-    note: '📄', topic: '🗂', idea: '💡', task: '✅',
-    resource: '🔗', journal: '📅', study: '📚',
-};
+import type { FileMeta } from '../../../types/sync';
+import { NoteTypeIcon } from '../../../lib/noteIcons';
 
 const VIEW_OPTIONS = [
     { value: 'list', label: 'List', icon: List },
@@ -43,6 +41,15 @@ const NOTE_TYPES: { value: string; label: string }[] = [
     { value: 'resource', label: 'Resources' },
     { value: 'journal', label: 'Journal' },
     { value: 'study', label: 'Study' },
+];
+
+const SORT_OPTIONS = [
+    { value: 'updated-desc', label: 'Updated (newest)' },
+    { value: 'updated-asc', label: 'Updated (oldest)' },
+    { value: 'title-asc', label: 'Title (A–Z)' },
+    { value: 'title-desc', label: 'Title (Z–A)' },
+    { value: 'created-desc', label: 'Created (newest)' },
+    { value: 'created-asc', label: 'Created (oldest)' },
 ];
 
 function timeAgo(ts: number): string {
@@ -89,6 +96,8 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
     const { files } = useSync();
     const { filterSubject, filterType, groupBy, view } = node.attrs;
     const [showConfig, setShowConfig] = useState(false);
+    const [collapsed, setCollapsed] = useState(false);
+    const [sortBy, setSortBy] = useState('updated-desc');
 
     // All unique subjects for autocomplete
     const allSubjects = useMemo(() => {
@@ -97,14 +106,26 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
         return ['', ...Array.from(subjects).sort()];
     }, [files]);
 
-    // Filter results
+    // Filter and sort results
     const results = useMemo(() => {
-        return files.filter((f) => {
+        const filtered = files.filter((f) => {
+            if (f.deletedAt) return false;
             if (filterType && f.type !== filterType) return false;
             if (filterSubject && f.subject !== filterSubject) return false;
             return true;
-        }).sort((a, b) => b.updatedAt - a.updatedAt);
-    }, [files, filterSubject, filterType]);
+        });
+
+        return filtered.sort((a, b) => {
+            switch (sortBy) {
+                case 'updated-asc': return a.updatedAt - b.updatedAt;
+                case 'title-asc': return (a.title || '').localeCompare(b.title || '');
+                case 'title-desc': return (b.title || '').localeCompare(a.title || '');
+                case 'created-desc': return b.createdAt - a.createdAt;
+                case 'created-asc': return a.createdAt - b.createdAt;
+                default: return b.updatedAt - a.updatedAt; // updated-desc
+            }
+        });
+    }, [files, filterSubject, filterType, sortBy]);
 
     const grouped = useMemo(() => groupNotes(results, groupBy), [results, groupBy]);
 
@@ -121,7 +142,7 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
                     onClick={() => handleOpenNote(n.id)}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg hover:bg-purple-500/10 transition-colors text-left group cursor-pointer"
                 >
-                    <span className="text-sm shrink-0">{TYPE_ICON[n.type] ?? '📄'}</span>
+                    <span className="text-sm shrink-0"><NoteTypeIcon type={n.type} size={14} /></span>
                     <span className="flex-1 text-[13px] text-zinc-300 truncate group-hover:text-white transition-colors">
                         {n.title || 'Untitled'}
                     </span>
@@ -149,7 +170,7 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
                     className="p-3 rounded-lg border border-zinc-800/40 hover:border-purple-500/30 bg-zinc-900/40 hover:bg-purple-500/5 transition-all text-left group cursor-pointer"
                 >
                     <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-sm">{TYPE_ICON[n.type] ?? '📄'}</span>
+                        <span className="text-sm"><NoteTypeIcon type={n.type} size={14} /></span>
                         <span className="text-[12px] text-zinc-300 font-medium truncate group-hover:text-white transition-colors">
                             {n.title || 'Untitled'}
                         </span>
@@ -188,7 +209,7 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
                         >
                             <td className="py-1.5 px-2 text-zinc-300 group-hover:text-white transition-colors">
                                 <span className="flex items-center gap-1.5">
-                                    <span className="text-sm">{TYPE_ICON[n.type] ?? '📄'}</span>
+                                    <span className="text-sm"><NoteTypeIcon type={n.type} size={14} /></span>
                                     {n.title || 'Untitled'}
                                 </span>
                             </td>
@@ -273,27 +294,47 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
                 className="query-block rounded-xl border border-purple-500/15 bg-purple-500/2 p-4"
                 contentEditable={false}
             >
-                {/* Header */}
+                {/* Header — click to expand/collapse */}
                 <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setCollapsed(!collapsed)}
+                        className="flex items-center gap-2 cursor-pointer group/header"
+                    >
+                        {collapsed ? (
+                            <ChevronRight size={14} className="text-purple-400" />
+                        ) : (
+                            <ChevronDown size={14} className="text-purple-400" />
+                        )}
                         <Search size={14} className="text-purple-400" />
-                        <span className="text-xs font-semibold text-purple-300/80 uppercase tracking-wider">
+                        <span className="text-xs font-semibold text-purple-300/80 uppercase tracking-wider group-hover/header:text-purple-200 transition-colors">
                             Query Block
                         </span>
                         <span className="text-[10px] text-zinc-600 font-mono">
                             {results.length} results
                         </span>
-                    </div>
-                    <button
-                        onClick={() => setShowConfig(!showConfig)}
-                        className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                            showConfig
-                                ? 'bg-purple-500/15 text-purple-400'
-                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-                        }`}
-                    >
-                        <Settings2 size={13} />
                     </button>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => {
+                                const idx = SORT_OPTIONS.findIndex(s => s.value === sortBy);
+                                setSortBy(SORT_OPTIONS[(idx + 1) % SORT_OPTIONS.length].value);
+                            }}
+                            className="p-1.5 rounded-lg transition-colors cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50"
+                            title={`Sort: ${SORT_OPTIONS.find(s => s.value === sortBy)?.label}`}
+                        >
+                            <ArrowUpDown size={13} />
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setShowConfig(!showConfig); }}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                showConfig
+                                    ? 'bg-purple-500/15 text-purple-400'
+                                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+                            }`}
+                        >
+                            <Settings2 size={13} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Config panel */}
@@ -379,11 +420,28 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
                                 })}
                             </div>
                         </div>
+
+                        {/* Sort by */}
+                        <div>
+                            <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1 block">
+                                Sort By
+                            </label>
+                            <select
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value)}
+                                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-200 outline-none focus:border-purple-500 transition-colors appearance-none cursor-pointer"
+                            >
+                                {SORT_OPTIONS.map((s) => (
+                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
                 )}
 
-                {/* Results */}
-                {results.length === 0 ? (
+                {/* Results — collapsible */}
+                {!collapsed && (
+                  results.length === 0 ? (
                     <div className="text-center py-6">
                         <FileText size={24} className="text-zinc-700 mx-auto mb-2" />
                         <p className="text-[12px] text-zinc-600">
@@ -413,6 +471,7 @@ export default function QueryBlockView({ node, updateAttributes }: ReactNodeView
                             </div>
                         ))}
                     </div>
+                  )
                 )}
             </div>
         </NodeViewWrapper>

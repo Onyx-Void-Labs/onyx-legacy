@@ -10,7 +10,8 @@ import {
     CalendarHeart,
 } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
-import type { FileMeta, NoteType } from '../../types/sync';
+import type { FileMeta } from '../../types/sync';
+import { NoteTypeIcon } from '../../lib/noteIcons';
 import {
     getCarriedOver,
     getDueToday,
@@ -30,11 +31,6 @@ const PRIORITY_BADGE: Record<string, { label: string; class: string }> = {
     medium: { label: 'Med', class: 'bg-blue-900/40 text-blue-300' },
     high: { label: 'High', class: 'bg-amber-900/40 text-amber-300' },
     urgent: { label: 'Urgent', class: 'bg-red-900/40 text-red-300' },
-};
-
-const TYPE_ICON: Record<NoteType, string> = {
-    note: '📄', topic: '🗂', idea: '💡', task: '✅',
-    resource: '🔗', journal: '📅', study: '📚',
 };
 
 function getGreeting(): string {
@@ -256,7 +252,7 @@ export default function TodayPage({ onOpenNote }: TodayPageProps) {
                                 onClick={() => onOpenNote(n.id)}
                                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-violet-500/5 transition-colors duration-150 text-left group cursor-pointer"
                             >
-                                <span className="text-[13px]">{TYPE_ICON[n.type] ?? '📄'}</span>
+                                <span className="text-[13px]"><NoteTypeIcon type={n.type} size={13} /></span>
                                 <span className="flex-1 text-[13px] text-zinc-400 truncate group-hover:text-white transition-colors">
                                     {n.title || 'Untitled'}
                                 </span>

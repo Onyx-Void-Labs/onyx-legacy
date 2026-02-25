@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { Search, FileText, Plus } from 'lucide-react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { Search, FileText, Plus, Tag } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
+import type { FileMeta } from '../../types/sync';
 
 type Note = {
     id: string;
@@ -15,15 +16,38 @@ interface SearchModalProps {
 }
 
 export default function SearchModal({ isOpen, onClose, notes, onSelectNote }: SearchModalProps) {
-    const { createFile, updateFile } = useSync();
+    const { createFile, updateFile, files } = useSync();
 
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [activeTag, setActiveTag] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    const filtered = notes.filter(n =>
-        (n.title || 'Untitled').toLowerCase().includes(query.toLowerCase())
-    );
+    /* Gather all unique tags across files for filter chips */
+    const allTags = useMemo(() => {
+        const tags = new Set<string>();
+        files.forEach((f: FileMeta) => {
+            f.tags?.forEach((t: string) => {
+                if (t.trim()) tags.add(t.trim());
+            });
+        });
+        return Array.from(tags).sort();
+    }, [files]);
+
+    /* Build a map of noteId → tags for quick lookup */
+    const noteTagMap = useMemo(() => {
+        const map = new Map<string, string[]>();
+        files.forEach((f: FileMeta) => {
+            if (f.tags && f.tags.length > 0) map.set(f.id, f.tags);
+        });
+        return map;
+    }, [files]);
+
+    const filtered = notes.filter(n => {
+        const matchesQuery = (n.title || 'Untitled').toLowerCase().includes(query.toLowerCase());
+        const matchesTag = activeTag ? (noteTagMap.get(n.id) ?? []).includes(activeTag) : true;
+        return matchesQuery && matchesTag;
+    });
 
     // Add "Create new" option when query exists but no exact match
     const hasExactMatch = notes.some(n => (n.title || '').toLowerCase() === query.toLowerCase());
@@ -34,6 +58,7 @@ export default function SearchModal({ isOpen, onClose, notes, onSelectNote }: Se
         if (isOpen) {
             setQuery('');
             setSelectedIndex(0);
+            setActiveTag(null);
             setTimeout(() => inputRef.current?.focus(), 50);
         }
     }, [isOpen]);
@@ -98,6 +123,26 @@ export default function SearchModal({ isOpen, onClose, notes, onSelectNote }: Se
                         className="flex-1 bg-transparent text-zinc-100 placeholder-zinc-600 outline-none text-sm"
                     />
                 </div>
+
+                {/* Tag filter chips */}
+                {allTags.length > 0 && (
+                    <div className="flex items-center gap-1.5 px-4 py-2 border-b border-zinc-800 overflow-x-auto">
+                        <Tag size={13} className="text-zinc-600 shrink-0" />
+                        {allTags.map((tag) => (
+                            <button
+                                key={tag}
+                                onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                                className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] border transition-colors cursor-pointer ${
+                                    activeTag === tag
+                                        ? 'bg-violet-500/20 text-violet-300 border-violet-500/30'
+                                        : 'bg-zinc-800/60 text-zinc-500 border-zinc-700/40 hover:text-zinc-300 hover:border-zinc-600/50'
+                                }`}
+                            >
+                                {tag}
+                            </button>
+                        ))}
+                    </div>
+                )}
 
                 {/* Results */}
                 <div className="max-h-80 overflow-y-auto">

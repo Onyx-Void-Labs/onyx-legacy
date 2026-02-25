@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import LockModal from "./LockModal";
 import { useSync } from "../../contexts/SyncContext";
 import { useSettings } from "../../contexts/SettingsContext";
+import { NoteTypeIcon, TYPE_EMOJI } from "../../lib/noteIcons";
 import type { FileMeta, NoteType } from "../../types/sync";
 
 type Note = {
@@ -11,16 +12,8 @@ type Note = {
     title: string;
 };
 
-// ─── Note type → emoji icon mapping ───
-const TYPE_ICON: Record<NoteType, string> = {
-    note: '📄',
-    topic: '🗂',
-    idea: '💡',
-    task: '✅',
-    resource: '🔗',
-    journal: '📅',
-    study: '📚',
-};
+// ─── Note type → emoji icon mapping (legacy, used for string contexts) ───
+const TYPE_ICON = TYPE_EMOJI;
 
 const TYPE_LABEL: Record<NoteType, string> = {
     note: 'Notes',
@@ -289,7 +282,7 @@ export default function Sidebar({
                                             : 'text-zinc-400 hover:bg-[rgba(124,110,247,0.08)] hover:text-zinc-100 hover:translate-x-0.5'
                                     }`}
                                 >
-                                    <span className="text-sm shrink-0 leading-none">{TYPE_ICON[noteType]}</span>
+                                    <span className="text-sm shrink-0 leading-none"><NoteTypeIcon type={noteType} size={14} /></span>
                                     <span className={`text-[13px] truncate flex-1 ${isActive ? 'font-medium' : ''}`}>
                                         {note.title || 'Untitled'}
                                     </span>
@@ -323,7 +316,7 @@ export default function Sidebar({
                                     size={11}
                                     className={`transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
                                 />
-                                <span className="text-sm not-italic" style={{ fontStyle: 'normal' }}>{TYPE_ICON[type]}</span>
+                                <span className="text-sm not-italic" style={{ fontStyle: 'normal' }}><NoteTypeIcon type={type} size={14} /></span>
                                 {TYPE_LABEL[type]}
                                 <span className="ml-auto text-zinc-700 font-mono text-[10px] normal-case">
                                     {group.length}
@@ -356,7 +349,7 @@ export default function Sidebar({
                                                         : 'text-zinc-400 hover:bg-[rgba(124,110,247,0.08)] hover:text-zinc-100 hover:translate-x-0.5 border-l-3 border-transparent'
                                                 }`}
                                             >
-                                                <span className="text-sm shrink-0 leading-none">{TYPE_ICON[type]}</span>
+                                                <span className="text-sm shrink-0 leading-none"><NoteTypeIcon type={type} size={14} /></span>
 
                                                 {isOpen && !isActive && (
                                                     <div className="w-1 h-1 rounded-full bg-violet-400 shrink-0" />

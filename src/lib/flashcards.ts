@@ -7,15 +7,40 @@
  *   3. Multiple Choice (MCQ) — question + options + correctIndex
  *   4. Matching — pairs [term, definition]
  *   5. Cloze deletion ({{c1::answer}} syntax)
+ *
+ * Hierarchical structure:
+ *   Collection (subject-level container)
+ *     └── Set / Topic (groups related cards)
+ *         └── Cards
  */
 
 /* ─── Types ─────────────────────────────────────────────── */
 
 export type CardType = 'basic' | 'fill-blank' | 'mcq' | 'matching' | 'cloze';
 
+export interface FlashcardCollection {
+    id: string;
+    name: string;
+    description?: string;
+    color?: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface FlashcardSet {
+    id: string;
+    collectionId: string;
+    name: string;
+    description?: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
 export interface Flashcard {
     id: string;               // uuid
     sourceNoteId: string;     // which note it came from
+    collectionId?: string;    // collection this card belongs to
+    setId?: string;           // set this card belongs to
     cardType: CardType;       // card type
     front: string;            // question / prompt
     back: string;             // answer
@@ -27,7 +52,7 @@ export interface Flashcard {
     /** Fill-blank: original sentence + blanked word indices */
     sentence?: string;
     blanks?: number[];
-    deck?: string;            // deck/subject grouping
+    deck?: string;            // legacy deck grouping (kept for migration)
     tags?: string[];          // optional tags
     createdAt: number;        // epoch ms
     /* SRS state */
@@ -43,11 +68,29 @@ export interface Flashcard {
 
 export type Rating = 'again' | 'hard' | 'good' | 'easy';
 
+export interface SessionHistoryEntry {
+    id: string;
+    collectionId?: string;
+    setId?: string;
+    collectionName?: string;
+    setName?: string;
+    date: number;
+    duration: number;
+    totalCards: number;
+    correctCount: number;
+    incorrectCount: number;
+    ratings: Record<Rating, number>;
+    cardResults: { cardId: string; rating: Rating; front: string; back: string }[];
+}
+
 /* ─── Constants ─────────────────────────────────────────── */
 
 const DB_NAME = 'onyx_flashcards';
-const DB_VERSION = 1;
-const STORE = 'cards';
+const DB_VERSION = 2;
+const STORE_CARDS = 'cards';
+const STORE_COLLECTIONS = 'collections';
+const STORE_SETS = 'sets';
+const STORE_SESSIONS = 'sessions';
 const DAY_MS = 86_400_000;
 
 /* ─── IndexedDB helpers ─────────────────────────────────── */
@@ -55,12 +98,44 @@ const DAY_MS = 86_400_000;
 function openDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = () => {
+        req.onupgradeneeded = (event) => {
             const db = req.result;
-            if (!db.objectStoreNames.contains(STORE)) {
-                const store = db.createObjectStore(STORE, { keyPath: 'id' });
+            const oldVersion = event.oldVersion;
+
+            if (oldVersion < 1) {
+                const store = db.createObjectStore(STORE_CARDS, { keyPath: 'id' });
                 store.createIndex('sourceNoteId', 'sourceNoteId', { unique: false });
                 store.createIndex('dueAt', 'dueAt', { unique: false });
+            }
+
+            if (oldVersion < 2) {
+                // Add collectionId and setId indexes to cards
+                if (db.objectStoreNames.contains(STORE_CARDS)) {
+                    const cardStore = req.transaction!.objectStore(STORE_CARDS);
+                    if (!cardStore.indexNames.contains('collectionId')) {
+                        cardStore.createIndex('collectionId', 'collectionId', { unique: false });
+                    }
+                    if (!cardStore.indexNames.contains('setId')) {
+                        cardStore.createIndex('setId', 'setId', { unique: false });
+                    }
+                }
+
+                // Create collections store
+                if (!db.objectStoreNames.contains(STORE_COLLECTIONS)) {
+                    db.createObjectStore(STORE_COLLECTIONS, { keyPath: 'id' });
+                }
+
+                // Create sets store
+                if (!db.objectStoreNames.contains(STORE_SETS)) {
+                    const setStore = db.createObjectStore(STORE_SETS, { keyPath: 'id' });
+                    setStore.createIndex('collectionId', 'collectionId', { unique: false });
+                }
+
+                // Create sessions store
+                if (!db.objectStoreNames.contains(STORE_SESSIONS)) {
+                    const sessionStore = db.createObjectStore(STORE_SESSIONS, { keyPath: 'id' });
+                    sessionStore.createIndex('date', 'date', { unique: false });
+                }
             }
         };
         req.onsuccess = () => resolve(req.result);
@@ -68,31 +143,47 @@ function openDB(): Promise<IDBDatabase> {
     });
 }
 
-async function tx(
+async function txStore(
+    storeName: string,
     mode: IDBTransactionMode,
     fn: (store: IDBObjectStore) => IDBRequest | void,
 ): Promise<void> {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const t = db.transaction(STORE, mode);
-        const store = t.objectStore(STORE);
+        const t = db.transaction(storeName, mode);
+        const store = t.objectStore(storeName);
         fn(store);
         t.oncomplete = () => { db.close(); resolve(); };
         t.onerror = () => { db.close(); reject(t.error); };
     });
 }
 
-async function txGet<T>(
+async function txStoreGet<T>(
+    storeName: string,
     fn: (store: IDBObjectStore) => IDBRequest,
 ): Promise<T> {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const t = db.transaction(STORE, 'readonly');
-        const store = t.objectStore(STORE);
+        const t = db.transaction(storeName, 'readonly');
+        const store = t.objectStore(storeName);
         const req = fn(store);
         req.onsuccess = () => { db.close(); resolve(req.result as T); };
         req.onerror = () => { db.close(); reject(req.error); };
     });
+}
+
+// Legacy helpers that use the cards store
+async function tx(
+    mode: IDBTransactionMode,
+    fn: (store: IDBObjectStore) => IDBRequest | void,
+): Promise<void> {
+    return txStore(STORE_CARDS, mode, fn);
+}
+
+async function txGet<T>(
+    fn: (store: IDBObjectStore) => IDBRequest,
+): Promise<T> {
+    return txStoreGet<T>(STORE_CARDS, fn);
 }
 
 /* ─── UUID helper ───────────────────────────────────────── */
@@ -106,11 +197,132 @@ function uuid(): string {
     );
 }
 
-/* ─── Public API ────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   Collection CRUD
+   ═══════════════════════════════════════════════════════════ */
+
+export async function createCollection(name: string, description?: string, color?: string): Promise<FlashcardCollection> {
+    const collection: FlashcardCollection = {
+        id: uuid(),
+        name: name.trim(),
+        description,
+        color,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+    };
+    await txStore(STORE_COLLECTIONS, 'readwrite', (store) => store.put(collection));
+    return collection;
+}
+
+export async function getAllCollections(): Promise<FlashcardCollection[]> {
+    return txStoreGet<FlashcardCollection[]>(STORE_COLLECTIONS, (store) => store.getAll());
+}
+
+export async function getCollection(id: string): Promise<FlashcardCollection | undefined> {
+    return txStoreGet<FlashcardCollection | undefined>(STORE_COLLECTIONS, (store) => store.get(id));
+}
+
+export async function updateCollection(id: string, updates: Partial<Pick<FlashcardCollection, 'name' | 'description' | 'color'>>): Promise<void> {
+    const existing = await getCollection(id);
+    if (!existing) return;
+    const updated = { ...existing, ...updates, updatedAt: Date.now() };
+    await txStore(STORE_COLLECTIONS, 'readwrite', (store) => store.put(updated));
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+    // Delete all sets in the collection
+    const sets = await getSetsForCollection(id);
+    for (const s of sets) {
+        await deleteSet(s.id);
+    }
+    // Delete cards directly in the collection (not in a set)
+    const cards = await getCardsForCollection(id);
+    for (const c of cards) {
+        await deleteCard(c.id);
+    }
+    await txStore(STORE_COLLECTIONS, 'readwrite', (store) => store.delete(id));
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Set CRUD
+   ═══════════════════════════════════════════════════════════ */
+
+export async function createSet(collectionId: string, name: string, description?: string): Promise<FlashcardSet> {
+    const set: FlashcardSet = {
+        id: uuid(),
+        collectionId,
+        name: name.trim(),
+        description,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+    };
+    await txStore(STORE_SETS, 'readwrite', (store) => store.put(set));
+    return set;
+}
+
+export async function getSetsForCollection(collectionId: string): Promise<FlashcardSet[]> {
+    return txStoreGet<FlashcardSet[]>(STORE_SETS, (store) =>
+        store.index('collectionId').getAll(collectionId)
+    );
+}
+
+export async function getAllSets(): Promise<FlashcardSet[]> {
+    return txStoreGet<FlashcardSet[]>(STORE_SETS, (store) => store.getAll());
+}
+
+export async function getSet(id: string): Promise<FlashcardSet | undefined> {
+    return txStoreGet<FlashcardSet | undefined>(STORE_SETS, (store) => store.get(id));
+}
+
+export async function updateSet(id: string, updates: Partial<Pick<FlashcardSet, 'name' | 'description'>>): Promise<void> {
+    const existing = await getSet(id);
+    if (!existing) return;
+    const updated = { ...existing, ...updates, updatedAt: Date.now() };
+    await txStore(STORE_SETS, 'readwrite', (store) => store.put(updated));
+}
+
+export async function deleteSet(id: string): Promise<void> {
+    // Delete all cards in this set
+    const cards = await getCardsForSet(id);
+    for (const c of cards) {
+        await deleteCard(c.id);
+    }
+    await txStore(STORE_SETS, 'readwrite', (store) => store.delete(id));
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Card CRUD
+   ═══════════════════════════════════════════════════════════ */
 
 /** Get all cards for a note. */
 export async function getCardsForNote(noteId: string): Promise<Flashcard[]> {
     return txGet<Flashcard[]>((store) => store.index('sourceNoteId').getAll(noteId));
+}
+
+/** Get all cards for a collection. */
+export async function getCardsForCollection(collectionId: string): Promise<Flashcard[]> {
+    const all = await getAllCards();
+    return all.filter((c) => c.collectionId === collectionId);
+}
+
+/** Get all cards for a set. */
+export async function getCardsForSet(setId: string): Promise<Flashcard[]> {
+    const all = await getAllCards();
+    return all.filter((c) => c.setId === setId);
+}
+
+/** Get due cards for a collection. */
+export async function getDueCardsForCollection(collectionId: string): Promise<Flashcard[]> {
+    const cards = await getCardsForCollection(collectionId);
+    const now = Date.now();
+    return cards.filter((c) => c.dueAt <= now).sort((a, b) => a.dueAt - b.dueAt);
+}
+
+/** Get due cards for a set. */
+export async function getDueCardsForSet(setId: string): Promise<Flashcard[]> {
+    const cards = await getCardsForSet(setId);
+    const now = Date.now();
+    return cards.filter((c) => c.dueAt <= now).sort((a, b) => a.dueAt - b.dueAt);
 }
 
 /** Get all cards. */
@@ -142,8 +354,8 @@ export async function deleteCardsForNote(noteId: string): Promise<void> {
     const cards = await getCardsForNote(noteId);
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const t = db.transaction(STORE, 'readwrite');
-        const store = t.objectStore(STORE);
+        const t = db.transaction(STORE_CARDS, 'readwrite');
+        const store = t.objectStore(STORE_CARDS);
         for (const c of cards) store.delete(c.id);
         t.oncomplete = () => { db.close(); resolve(); };
         t.onerror = () => { db.close(); reject(t.error); };
@@ -155,11 +367,13 @@ export function newCard(
     sourceNoteId: string,
     front: string,
     back: string,
-    opts?: Partial<Pick<Flashcard, 'cardType' | 'hint' | 'options' | 'correctIndex' | 'matchPairs' | 'clozeIndex' | 'deck' | 'tags' | 'sentence' | 'blanks'>>,
+    opts?: Partial<Pick<Flashcard, 'cardType' | 'hint' | 'options' | 'correctIndex' | 'matchPairs' | 'clozeIndex' | 'deck' | 'tags' | 'sentence' | 'blanks' | 'collectionId' | 'setId'>>,
 ): Flashcard {
     return {
         id: uuid(),
         sourceNoteId,
+        collectionId: opts?.collectionId,
+        setId: opts?.setId,
         cardType: opts?.cardType ?? 'basic',
         front: front.trim(),
         back: back.trim(),
@@ -264,6 +478,33 @@ export async function reviewCard(
 
     await upsertCard(updated);
     return updated;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Session History
+   ═══════════════════════════════════════════════════════════ */
+
+export async function saveSessionHistory(entry: Omit<SessionHistoryEntry, 'id'>): Promise<SessionHistoryEntry> {
+    const record: SessionHistoryEntry = { ...entry, id: uuid() };
+    await txStore(STORE_SESSIONS, 'readwrite', (store) => store.put(record));
+    return record;
+}
+
+export async function getSessionHistory(daysBack: number = 30): Promise<SessionHistoryEntry[]> {
+    const all = await txStoreGet<SessionHistoryEntry[]>(STORE_SESSIONS, (store) => store.getAll());
+    const cutoff = Date.now() - daysBack * DAY_MS;
+    return all
+        .filter((s) => s.date >= cutoff)
+        .sort((a, b) => b.date - a.date);
+}
+
+export async function clearOldSessions(daysBack: number = 30): Promise<void> {
+    const all = await txStoreGet<SessionHistoryEntry[]>(STORE_SESSIONS, (store) => store.getAll());
+    const cutoff = Date.now() - daysBack * DAY_MS;
+    const toDelete = all.filter((s) => s.date < cutoff);
+    for (const s of toDelete) {
+        await txStore(STORE_SESSIONS, 'readwrite', (store) => store.delete(s.id));
+    }
 }
 
 /* ─── Auto-extraction helpers ───────────────────────────── */
@@ -381,7 +622,7 @@ export function extractCardsFromText(
     return cards;
 }
 
-/** Get cards grouped by deck/subject. */
+/** Get cards grouped by deck/subject (legacy). */
 export async function getCardsByDeck(): Promise<Map<string, Flashcard[]>> {
     const all = await getAllCards();
     const map = new Map<string, Flashcard[]>();
@@ -480,4 +721,44 @@ export async function syncExtractedCards(
     }
 
     return extracted.length;
+}
+
+/** Migrate legacy flat cards with deck field to collection/set hierarchy */
+export async function migrateLegacyCards(): Promise<void> {
+    const allCards = await getAllCards();
+    const collections = await getAllCollections();
+
+    // Find cards with deck but no collectionId
+    const cardsToMigrate = allCards.filter((c) => c.deck && !c.collectionId);
+    if (cardsToMigrate.length === 0) return;
+
+    // Group by deck
+    const deckGroups = new Map<string, Flashcard[]>();
+    for (const card of cardsToMigrate) {
+        const deck = card.deck || 'Uncategorized';
+        if (!deckGroups.has(deck)) deckGroups.set(deck, []);
+        deckGroups.get(deck)!.push(card);
+    }
+
+    // Create collections and default sets for each deck
+    const existingCollectionNames = new Set(collections.map((c) => c.name));
+
+    for (const [deckName, cards] of deckGroups) {
+        let collection: FlashcardCollection;
+        if (existingCollectionNames.has(deckName)) {
+            collection = collections.find((c) => c.name === deckName)!;
+        } else {
+            collection = await createCollection(deckName);
+        }
+
+        const defaultSet = await createSet(collection.id, 'General');
+
+        for (const card of cards) {
+            await upsertCard({
+                ...card,
+                collectionId: collection.id,
+                setId: defaultSet.id,
+            });
+        }
+    }
 }

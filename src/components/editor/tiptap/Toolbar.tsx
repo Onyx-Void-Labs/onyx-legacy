@@ -66,6 +66,11 @@ const FONT_FAMILIES = [
     { label: 'JetBrains Mono', value: 'JetBrains Mono' },
     { label: 'Lora', value: 'Lora' },
     { label: 'Merriweather', value: 'Merriweather' },
+    { label: 'Roboto', value: 'Roboto' },
+    { label: 'Roboto Mono', value: 'Roboto Mono' },
+    { label: 'Times New Roman', value: 'Times New Roman' },
+    { label: 'Arial', value: 'Arial' },
+    { label: 'Verdana', value: 'Verdana' },
     { label: 'Comic Sans MS', value: 'Comic Sans MS, Indie Flower' },
 ];
 
@@ -77,46 +82,120 @@ interface FontFamilyDropdownProps {
 
 const FontFamilyDropdown: React.FC<FontFamilyDropdownProps> = ({ editor }) => {
     const [open, setOpen] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [search, setSearch] = useState('');
     const ref = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
 
     const currentFamily = editor.getAttributes('textStyle')?.fontFamily || 'Inter';
     const displayName = FONT_FAMILIES.find(
         (f) => f.value === currentFamily || currentFamily.includes(f.label)
-    )?.label || 'Inter';
+    )?.label || currentFamily.split(',')[0].trim();
+
+    // Filter fonts by search query
+    const filteredFonts = FONT_FAMILIES.filter((f) =>
+        f.label.toLowerCase().includes(search.toLowerCase())
+    );
 
     useEffect(() => {
-        if (!open) return;
+        if (!open && !editing) return;
         const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setOpen(false);
+                setEditing(false);
+                setSearch('');
+            }
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
+    }, [open, editing]);
+
+    // Update dropdown position when opening
+    useEffect(() => {
+        if (open && ref.current) {
+            const rect = ref.current.getBoundingClientRect();
+            setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+        }
     }, [open]);
 
     const selectFont = (value: string) => {
         editor.chain().focus().setFontFamily(value).run();
         localStorage.setItem(FONT_FAMILY_STORAGE_KEY, value);
         setOpen(false);
+        setEditing(false);
+        setSearch('');
+    };
+
+    const handleClick = () => {
+        // Single click: make it editable to type a font name
+        setEditing(true);
+        setSearch(displayName);
+        setOpen(true);
+        setTimeout(() => inputRef.current?.select(), 0);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            // If there's exactly one match, select it
+            if (filteredFonts.length === 1) {
+                selectFont(filteredFonts[0].value);
+            } else if (filteredFonts.length > 0) {
+                selectFont(filteredFonts[0].value);
+            }
+        } else if (e.key === 'Escape') {
+            setEditing(false);
+            setOpen(false);
+            setSearch('');
+        }
     };
 
     return (
         <div ref={ref} className="relative">
-            <button
-                onMouseDown={(e) => {
-                    e.preventDefault();
-                    setOpen(!open);
-                }}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-300 hover:bg-zinc-700/30 transition-colors cursor-pointer min-w-20"
-                title="Font Family"
-            >
-                <span className="truncate" style={{ fontFamily: currentFamily }}>
-                    {displayName}
-                </span>
-                <ChevronDown size={10} className="text-zinc-500 shrink-0" />
-            </button>
-            {open && (
-                <div className="absolute top-full left-0 mt-1 w-48 bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-xl py-1 z-9999">
-                    {FONT_FAMILIES.map((f) => (
+            {editing ? (
+                <input
+                    ref={inputRef}
+                    type="text"
+                    value={search}
+                    onChange={(e) => {
+                        setSearch(e.target.value);
+                        setOpen(true);
+                    }}
+                    onKeyDown={handleKeyDown}
+                    onBlur={() => {
+                        setTimeout(() => {
+                            setEditing(false);
+                            setSearch('');
+                        }, 200);
+                    }}
+                    className="px-2 py-1 rounded-md text-xs text-zinc-200 bg-zinc-800 border border-violet-500/50 outline-none min-w-24"
+                    autoFocus
+                />
+            ) : (
+                <button
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleClick();
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-300 hover:bg-zinc-700/30 transition-colors cursor-pointer min-w-20"
+                    title="Font Family (click to search)"
+                >
+                    <span className="truncate" style={{ fontFamily: currentFamily }}>
+                        {displayName}
+                    </span>
+                    <ChevronDown size={10} className="text-zinc-500 shrink-0" />
+                </button>
+            )}
+            {open && createPortal(
+                <div
+                    className="w-52 bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-xl py-1 max-h-72 overflow-y-auto custom-scrollbar animate-fade-in-up"
+                    style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, zIndex: 99999 }}
+                    onMouseDown={(e) => e.preventDefault()}
+                >
+                    {filteredFonts.length === 0 && (
+                        <div className="px-3 py-2 text-xs text-zinc-500">No fonts match "{search}"</div>
+                    )}
+                    {filteredFonts.map((f) => (
                         <button
                             key={f.value}
                             onMouseDown={(e) => {
@@ -133,7 +212,8 @@ const FontFamilyDropdown: React.FC<FontFamilyDropdownProps> = ({ editor }) => {
                             {f.label}
                         </button>
                     ))}
-                </div>
+                </div>,
+                document.body,
             )}
         </div>
     );
@@ -141,7 +221,7 @@ const FontFamilyDropdown: React.FC<FontFamilyDropdownProps> = ({ editor }) => {
 
 /* ─── Font Size Input ─────────────────────────────────────── */
 
-const FONT_SIZES = ['10', '11', '12', '13', '14', '15', '16', '18', '20', '24', '28', '32', '36', '48', '64', '72'];
+const FONT_SIZES = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '32', '36', '48', '60', '72'];
 
 interface FontSizeInputProps {
     editor: Editor;
@@ -153,11 +233,12 @@ const FontSizeInput: React.FC<FontSizeInputProps> = ({ editor }) => {
     const [value, setValue] = useState('');
     const ref = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
 
     const currentSize = editor.getAttributes('textStyle')?.fontSize || '16';
 
     useEffect(() => {
-        if (!open) return;
+        if (!open && !editing) return;
         const handler = (e: MouseEvent) => {
             if (ref.current && !ref.current.contains(e.target as Node)) {
                 setOpen(false);
@@ -166,6 +247,14 @@ const FontSizeInput: React.FC<FontSizeInputProps> = ({ editor }) => {
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
+    }, [open, editing]);
+
+    // Update dropdown position when opening
+    useEffect(() => {
+        if (open && ref.current) {
+            const rect = ref.current.getBoundingClientRect();
+            setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+        }
     }, [open]);
 
     const applySize = (size: string) => {
@@ -186,42 +275,57 @@ const FontSizeInput: React.FC<FontSizeInputProps> = ({ editor }) => {
         }
     };
 
+    const handleClick = () => {
+        // Single click starts editing mode
+        setEditing(true);
+        setValue(currentSize);
+        setTimeout(() => inputRef.current?.select(), 0);
+    };
+
+    const handleDropdownToggle = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(!open);
+    };
+
     return (
-        <div ref={ref} className="relative">
+        <div ref={ref} className="relative flex items-center">
+            {editing ? (
+                <input
+                    ref={inputRef}
+                    type="text"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value.replace(/\D/g, ''))}
+                    onKeyDown={handleKeyDown}
+                    onBlur={() => { applySize(value); }}
+                    className="w-10 px-1 py-1 bg-zinc-800 text-xs text-zinc-200 outline-none text-center font-mono rounded-md border border-violet-500/50"
+                    autoFocus
+                />
+            ) : (
+                <button
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleClick();
+                    }}
+                    className="flex items-center gap-0.5 px-1.5 py-1 rounded-md text-xs text-zinc-300 hover:bg-zinc-700/30 transition-colors cursor-pointer min-w-9 justify-center"
+                    title="Font Size (click to type)"
+                >
+                    <span className="font-mono">{currentSize}</span>
+                </button>
+            )}
             <button
-                onMouseDown={(e) => {
-                    e.preventDefault();
-                    if (e.detail === 2) {
-                        setEditing(true);
-                        setValue(currentSize);
-                        setTimeout(() => inputRef.current?.select(), 0);
-                    } else {
-                        setOpen(!open);
-                    }
-                }}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-300 hover:bg-zinc-700/30 transition-colors cursor-pointer min-w-11 justify-center"
-                title="Font Size (double-click to type)"
+                onMouseDown={handleDropdownToggle}
+                className="p-0.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/30 transition-colors cursor-pointer"
+                title="Font size presets"
             >
-                {editing ? (
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={value}
-                        onChange={(e) => setValue(e.target.value.replace(/\D/g, ''))}
-                        onKeyDown={handleKeyDown}
-                        onBlur={() => { applySize(value); }}
-                        className="w-8 bg-transparent text-xs text-zinc-200 outline-none text-center font-mono"
-                        autoFocus
-                    />
-                ) : (
-                    <>
-                        <span className="font-mono">{currentSize}</span>
-                        <ChevronDown size={10} className="text-zinc-500 shrink-0" />
-                    </>
-                )}
+                <ChevronDown size={10} />
             </button>
-            {open && !editing && (
-                <div className="absolute top-full left-0 mt-1 w-20 bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-xl py-1 z-9999 max-h-64 overflow-y-auto custom-scrollbar">
+            {open && createPortal(
+                <div
+                    className="w-20 bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-xl py-1 max-h-64 overflow-y-auto custom-scrollbar animate-fade-in-up"
+                    style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, zIndex: 99999 }}
+                    onMouseDown={(e) => e.preventDefault()}
+                >
                     {FONT_SIZES.map((s) => (
                         <button
                             key={s}
@@ -238,7 +342,8 @@ const FontSizeInput: React.FC<FontSizeInputProps> = ({ editor }) => {
                             {s}
                         </button>
                     ))}
-                </div>
+                </div>,
+                document.body,
             )}
         </div>
     );
@@ -551,7 +656,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({ editor }) => {
 
             {/* Group 3 — Inline formatting */}
             <ToolbarButton
-                onClick={() => editor.chain().focus().toggleBold().run()}
+                onClick={() => {
+                    // BUG 7+8: Use toggleMark directly to ensure bold works
+                    // inside headings and alongside color/TextStyle marks
+                    if (editor.isActive('heading')) {
+                        editor.chain().focus().toggleMark('bold').run();
+                    } else {
+                        editor.chain().focus().toggleBold().run();
+                    }
+                }}
                 isActive={editor.isActive('bold')}
                 title="Bold (Ctrl+B)"
             >

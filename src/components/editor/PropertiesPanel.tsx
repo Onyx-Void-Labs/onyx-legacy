@@ -726,6 +726,8 @@ export default function PropertiesPanel({
     const [newPropType, setNewPropType] = useState<PropType>('text');
     const [subjectQuery, setSubjectQuery] = useState(meta.subject ?? '');
     const [showSubjectDropdown, setShowSubjectDropdown] = useState(false);
+    const [tagInput, setTagInput] = useState('');
+    const [showTagDropdown, setShowTagDropdown] = useState(false);
 
     // Context menu
     const [ctxMenu, setCtxMenu] = useState<{
@@ -768,6 +770,26 @@ export default function PropertiesPanel({
         return allSubjects.filter((s) => s.toLowerCase().includes(q));
     }, [allSubjects, subjectQuery]);
 
+    /* Tag autocomplete */
+    const allTags = useMemo(() => {
+        const tags = new Set<string>();
+        files.forEach((f) => {
+            f.tags?.forEach((t) => {
+                if (t.trim()) tags.add(t.trim());
+            });
+        });
+        return Array.from(tags).sort();
+    }, [files]);
+
+    const filteredTagSuggestions = useMemo(() => {
+        const currentTags = meta.tags ?? [];
+        if (!tagInput.trim()) return allTags.filter((t) => !currentTags.includes(t));
+        const q = tagInput.toLowerCase();
+        return allTags.filter(
+            (t) => t.toLowerCase().includes(q) && !currentTags.includes(t)
+        );
+    }, [allTags, tagInput, meta.tags]);
+
     /* Property key ordering */
     const propOrder: string[] = useMemo(() => {
         if (!meta.properties) return [];
@@ -800,6 +822,27 @@ export default function PropertiesPanel({
             updateFile(noteId, patch);
         },
         [noteId, updateFile]
+    );
+
+    const addTag = useCallback(
+        (tag: string) => {
+            const trimmed = tag.trim();
+            if (!trimmed) return;
+            const current = meta.tags ?? [];
+            if (current.includes(trimmed)) return;
+            update({ tags: [...current, trimmed] });
+            setTagInput('');
+            setShowTagDropdown(false);
+        },
+        [meta.tags, update]
+    );
+
+    const removeTag = useCallback(
+        (tag: string) => {
+            const current = meta.tags ?? [];
+            update({ tags: current.filter((t) => t !== tag) });
+        },
+        [meta.tags, update]
     );
 
     const updateProperty = useCallback(
@@ -1029,6 +1072,71 @@ export default function PropertiesPanel({
                                             className="w-full text-left px-3 py-1.5 text-sm text-zinc-300 hover:bg-violet-500/10 transition-colors cursor-pointer"
                                         >
                                             {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                    </div>
+                </div>
+
+                {/* ---- Tags (freeform autocomplete) ---- */}
+                <div>
+                    <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">
+                        <Tag size={12} />
+                        Tags
+                    </label>
+                    {(meta.tags ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                            {(meta.tags ?? []).map((tag) => (
+                                <span
+                                    key={tag}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-violet-500/15 text-violet-300 border border-violet-500/20"
+                                >
+                                    {tag}
+                                    <button
+                                        onClick={() => removeTag(tag)}
+                                        className="hover:text-red-400 transition-colors cursor-pointer"
+                                    >
+                                        <X size={10} />
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                    <div className="relative">
+                        <input
+                            type="text"
+                            value={tagInput}
+                            onChange={(e) => {
+                                setTagInput(e.target.value);
+                                setShowTagDropdown(true);
+                            }}
+                            onFocus={() => setShowTagDropdown(true)}
+                            onBlur={() => {
+                                setTimeout(() => setShowTagDropdown(false), 200);
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && tagInput.trim()) {
+                                    e.preventDefault();
+                                    addTag(tagInput);
+                                }
+                            }}
+                            placeholder="Add tag…"
+                            className={INPUT_CLS}
+                        />
+                        {showTagDropdown &&
+                            filteredTagSuggestions.length > 0 && (
+                                <div className="absolute z-50 mt-1 w-full bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-xl max-h-32 overflow-auto">
+                                    {filteredTagSuggestions.map((t) => (
+                                        <button
+                                            key={t}
+                                            onMouseDown={(e) => {
+                                                e.preventDefault();
+                                                addTag(t);
+                                            }}
+                                            className="w-full text-left px-3 py-1.5 text-sm text-zinc-300 hover:bg-violet-500/10 transition-colors cursor-pointer"
+                                        >
+                                            {t}
                                         </button>
                                     ))}
                                 </div>

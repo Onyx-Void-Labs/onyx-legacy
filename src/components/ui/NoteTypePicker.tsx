@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { NoteType } from '../../types/sync';
+import { NoteTypeIcon } from '../../lib/noteIcons';
 
 interface NoteTypePickerProps {
     isOpen: boolean;
@@ -7,13 +8,13 @@ interface NoteTypePickerProps {
     onSelect: (type: NoteType) => void;
 }
 
-const TYPES: { type: NoteType; icon: string; label: string; desc: string }[] = [
-    { type: 'note', icon: '📄', label: 'Note', desc: 'General-purpose note' },
-    { type: 'topic', icon: '🗂', label: 'Topic', desc: 'Organise related notes' },
-    { type: 'idea', icon: '💡', label: 'Idea', desc: 'Capture a thought' },
-    { type: 'task', icon: '✅', label: 'Task', desc: 'Track progress with metadata' },
-    { type: 'resource', icon: '🔗', label: 'Resource', desc: 'Link to external content' },
-    { type: 'study', icon: '📚', label: 'Study', desc: 'Flashcards auto-extract from Q:/A:' },
+const TYPES: { type: NoteType; label: string; desc: string }[] = [
+    { type: 'note', label: 'Note', desc: 'General-purpose note' },
+    { type: 'topic', label: 'Topic', desc: 'Organise related notes' },
+    { type: 'idea', label: 'Idea', desc: 'Capture a thought' },
+    { type: 'task', label: 'Task', desc: 'Track progress with metadata' },
+    { type: 'resource', label: 'Resource', desc: 'Link to external content' },
+    { type: 'study', label: 'Study', desc: 'Flashcards auto-extract from Q:/A:' },
 ];
 
 export default function NoteTypePicker({ isOpen, onClose, onSelect }: NoteTypePickerProps) {
@@ -67,7 +68,7 @@ export default function NoteTypePicker({ isOpen, onClose, onSelect }: NoteTypePi
                             }}
                             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-purple-900/25 transition-all duration-150 text-left group cursor-pointer"
                         >
-                            <span className="text-2xl">{t.icon}</span>
+                            <span className="text-2xl"><NoteTypeIcon type={t.type} size={24} /></span>
                             <div className="flex-1 min-w-0">
                                 <div className="text-[13px] font-medium text-zinc-200 group-hover:text-white transition-colors">
                                     {t.label}

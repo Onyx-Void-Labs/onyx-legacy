@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ArrowUpDown, Plus, Search, List as ListIcon, Grid3X3, Columns3, Calendar } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
+import { NoteTypeIcon } from '../../lib/noteIcons';
 import type { FileMeta, NoteType } from '../../types/sync';
 
 const TYPE_LABEL: Record<NoteType, string> = {
@@ -11,16 +12,6 @@ const TYPE_LABEL: Record<NoteType, string> = {
     resource: 'Resources',
     journal: 'Journal',
     study: 'Study',
-};
-
-const TYPE_ICON: Record<NoteType, string> = {
-    note: '📄',
-    topic: '🗂',
-    idea: '💡',
-    task: '✅',
-    resource: '🔗',
-    journal: '📅',
-    study: '📚',
 };
 
 type SortField = 'title' | 'updatedAt' | 'subject';
@@ -105,7 +96,7 @@ export default function CollectionView({ type, onOpenNote, onNewNote }: Collecti
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-2.5">
-                        <span className="text-xl">{TYPE_ICON[type]}</span>
+                        <span className="text-xl"><NoteTypeIcon type={type} size={20} /></span>
                         <h1 className="text-xl font-bold text-zinc-100">{TYPE_LABEL[type]}</h1>
                         <span className="text-sm text-zinc-600 font-mono ml-1">{filtered.length}</span>
                     </div>
@@ -204,7 +195,7 @@ function ListView({
                         className="w-full grid grid-cols-[1fr_120px_120px] gap-4 px-3 py-2.5 text-left hover:bg-violet-500/5 transition-colors cursor-pointer group"
                     >
                         <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-[13px] shrink-0">{TYPE_ICON[type]}</span>
+                            <span className="text-[13px] shrink-0"><NoteTypeIcon type={type} size={13} /></span>
                             <span className="text-[13px] text-zinc-300 truncate group-hover:text-white transition-colors">
                                 {note.title || 'Untitled'}
                             </span>
@@ -235,7 +226,7 @@ function GridView({
                     className="text-left p-4 rounded-xl border border-zinc-800/40 bg-zinc-800/20 hover:bg-violet-500/5 hover:border-violet-500/20 transition-all cursor-pointer group"
                 >
                     <div className="flex items-center gap-1.5 mb-2 min-h-18">
-                        <span className="text-sm">{TYPE_ICON[type]}</span>
+                        <span className="text-sm"><NoteTypeIcon type={type} size={14} /></span>
                         <span className="text-[13px] font-medium text-zinc-200 truncate group-hover:text-white transition-colors">
                             {note.title || 'Untitled'}
                         </span>

@@ -2,21 +2,12 @@ import { useMemo } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
 import type { FileMeta, NoteType } from '../../types/sync';
+import { NoteTypeIcon } from '../../lib/noteIcons';
 
 interface TopicQueryProps {
     topicTitle: string;
     onOpenNote: (id: string) => void;
 }
-
-const TYPE_ICON: Record<NoteType, string> = {
-    note: '📄',
-    topic: '🗂',
-    idea: '💡',
-    task: '✅',
-    resource: '🔗',
-    journal: '📅',
-    study: '📚',
-};
 
 const TYPE_LABEL: Record<NoteType, string> = {
     note: 'Notes',
@@ -87,7 +78,7 @@ export default function TopicQuery({ topicTitle, onOpenNote }: TopicQueryProps) 
                 return (
                     <div key={type}>
                         <div className="flex items-center gap-1.5 mb-1.5">
-                            <span className="text-sm">{TYPE_ICON[type]}</span>
+                            <span className="text-sm"><NoteTypeIcon type={type} size={14} /></span>
                             <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                                 {TYPE_LABEL[type]}
                             </span>

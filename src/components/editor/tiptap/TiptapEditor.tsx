@@ -51,8 +51,10 @@ import { SlashMenu } from './SlashMenu';
 import { TiptapFindWidget } from './TiptapFindWidget';
 import { NoteLinkSuggestion } from './NoteLinkSuggestion';
 import BacklinksPanel from '../BacklinksPanel';
+import VersionHistoryPanel from '../VersionHistoryPanel';
+import PropertyPills from '../PropertyPills';
 import { getTemplate, TEMPLATE_LIST } from '../../../lib/templates';
-import type { TemplateType } from '../../../types/sync';
+import type { FileMeta, TemplateType } from '../../../types/sync';
 
 // Contexts
 import { useSync } from '../../../contexts/SyncContext';
@@ -62,6 +64,8 @@ const lowlight = createLowlight(common);
 
 interface TiptapEditorProps {
     activeNoteId: string | null;
+    meta?: FileMeta;
+    onOpenProperties?: () => void;
 }
 
 /**
@@ -416,7 +420,7 @@ function VideoInsertDialog({ onInsert, onClose }: { onInsert: (url: string) => v
     );
 }
 
-export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
+export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: TiptapEditorProps) {
     const { updateFile } = useSync();
     const settings = useSettings();
 
@@ -462,6 +466,17 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
                     dropcursor: false, // Use custom dropcursor
                     link: false, // Use custom link config
                     underline: false, // We use the separate UnderlineExt import
+                    heading: {
+                        levels: [1, 2, 3, 4, 5, 6],
+                    },
+                    // BUG 7 + 8: Set bold mark with lower priority so it doesn't
+                    // conflict with TextStyle / Color marks, and works inside headings
+                    bold: {
+                        HTMLAttributes: {},
+                    },
+                    italic: {
+                        HTMLAttributes: {},
+                    },
                 }),
                 Placeholder.configure({
                     placeholder: ({ node }) => {
@@ -486,7 +501,11 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
                 UnderlineExt,
                 SubscriptExt,
                 SuperscriptExt,
-                TextStyle,
+                // BUG 8: TextStyle must have lower priority than bold (default 1000)
+                // so bold toggles work even when a color/font is applied
+                TextStyle.configure({
+                    mergeNestedSpanStyles: true,
+                }),
                 FontFamily,
                 FontSize,
                 Color,
@@ -824,6 +843,13 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
                         fontWeight: 700,
                     }}
                 />
+
+                {/* Property Pills — below title, subtle grey pills */}
+                {meta && (
+                    <div className="mt-1">
+                        <PropertyPills meta={meta} onClick={onOpenProperties} />
+                    </div>
+                )}
             </div>
 
             {/* Editor Content */}
@@ -885,6 +911,35 @@ export default function TiptapEditor({ activeNoteId }: TiptapEditorProps) {
                         currentNoteId={activeNoteId}
                         onOpenNote={(id) => {
                             window.dispatchEvent(new CustomEvent('onyx:open-note', { detail: { noteId: id } }));
+                        }}
+                    />
+                )}
+
+                {/* Version History Panel — below backlinks */}
+                {activeNoteId && (
+                    <VersionHistoryPanel
+                        noteId={activeNoteId}
+                        getDocState={() => {
+                            if (!yDocRef.current) return null;
+                            return Y.encodeStateAsUpdate(yDocRef.current);
+                        }}
+                        getDocPreview={() => {
+                            if (!editor) return '';
+                            return editor.getText().slice(0, 200);
+                        }}
+                        getWordCount={() => {
+                            if (!editor) return 0;
+                            const text = editor.getText();
+                            return text.trim() ? text.trim().split(/\s+/).length : 0;
+                        }}
+                        onRestore={(state) => {
+                            if (!yDocRef.current) return;
+                            const doc = yDocRef.current;
+                            doc.transact(() => {
+                                const fragment = doc.getXmlFragment('default');
+                                fragment.delete(0, fragment.length);
+                            });
+                            Y.applyUpdate(doc, state);
                         }}
                     />
                 )}

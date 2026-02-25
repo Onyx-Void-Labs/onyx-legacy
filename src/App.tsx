@@ -15,7 +15,6 @@ import TodayPage from "@/components/editor/TodayPage";
 import FlashcardView from "@/components/editor/FlashcardView";
 import CollectionView from "@/components/editor/CollectionView";
 import PropertiesPanel from "@/components/editor/PropertiesPanel";
-import PropertyPills from "@/components/editor/PropertyPills";
 import TopicQuery from "@/components/editor/TopicQuery";
 import TrashView from "@/components/editor/TrashView";
 
@@ -45,7 +44,7 @@ const COLLECTION_PREFIX = '__collection:'; // e.g. __collection:task
 
 function AppContent() {
   // Use Sync Context for File List (Single Source of Truth)
-  const { files, deleteFile, createFile } = useSync();
+  const { files, deleteFile, createFile, updateFile } = useSync();
   const { toggleSettings, settings } = useSettings();
   const { activeWorkspace } = useWorkspace();
 
@@ -66,6 +65,24 @@ function AppContent() {
     });
     return () => { unsubscribe(); };
   }, []);
+
+  // Process imported notes from onboarding
+  useEffect(() => {
+    const pending = localStorage.getItem('onyx-import-pending');
+    if (!pending) return;
+    try {
+      const notes: { name: string; content: string }[] = JSON.parse(pending);
+      for (const note of notes) {
+        const id = createFile();
+        updateFile(id, { title: note.name || 'Imported Note' });
+        // Content will be set as plain text in the note body via a custom event
+        window.dispatchEvent(new CustomEvent('onyx:import-content', { detail: { noteId: id, content: note.content } }));
+      }
+    } catch {
+      // ignore parse errors
+    }
+    localStorage.removeItem('onyx-import-pending');
+  }, [createFile, updateFile]);
 
   const handleLogout = () => {
     pb.authStore.clear();
@@ -338,17 +355,12 @@ function AppContent() {
                   </ErrorBoundary>
                 ) : (
                   <>
-                    {/* Inline property pills under title */}
-                    {activeNoteMeta && !isToday && !isFlashcards && (
-                      <div className="px-12 pt-0 pb-1 shrink-0">
-                        <PropertyPills
-                          meta={activeNoteMeta}
-                          onClick={() => setPropertiesPanelOpen(true)}
-                        />
-                      </div>
-                    )}
                     <ErrorBoundary fallbackTitle="Editor crashed">
-                      <Editor activeNoteId={activeTabId} />
+                      <Editor
+                        activeNoteId={activeTabId}
+                        meta={activeNoteMeta}
+                        onOpenProperties={() => setPropertiesPanelOpen(true)}
+                      />
                     </ErrorBoundary>
                     {/* Topic auto-query section at bottom */}
                     {isTopic && activeNoteMeta && (
@@ -363,27 +375,29 @@ function AppContent() {
 
               {/* Properties panel on right */}
               {activeNoteMeta && propertiesPanelOpen && activeTabId && !isToday && !isFlashcards && (
-                <PropertiesPanel
-                  noteId={activeTabId}
-                  meta={activeNoteMeta}
-                  onClose={() => setPropertiesPanelOpen(false)}
-                />
+                <ErrorBoundary fallbackTitle="Properties panel crashed">
+                  <PropertiesPanel
+                    noteId={activeTabId}
+                    meta={activeNoteMeta}
+                    onClose={() => setPropertiesPanelOpen(false)}
+                  />
+                </ErrorBoundary>
               )}
             </div>
           </div>
         );
       case 'messages':
-        return <MessagesView />;
+        return <ErrorBoundary fallbackTitle="Messages crashed"><MessagesView /></ErrorBoundary>;
       case 'calendar':
-        return <CalendarView />;
+        return <ErrorBoundary fallbackTitle="Calendar crashed"><CalendarView /></ErrorBoundary>;
       case 'email':
-        return <EmailView />;
+        return <ErrorBoundary fallbackTitle="Email crashed"><EmailView /></ErrorBoundary>;
       case 'photos':
-        return <PhotosView />;
+        return <ErrorBoundary fallbackTitle="Photos crashed"><PhotosView /></ErrorBoundary>;
       case 'passwords':
-        return <PasswordsView />;
+        return <ErrorBoundary fallbackTitle="Passwords crashed"><PasswordsView /></ErrorBoundary>;
       case 'cloud':
-        return <CloudView />;
+        return <ErrorBoundary fallbackTitle="Cloud crashed"><CloudView /></ErrorBoundary>;
       default:
         return null;
     }

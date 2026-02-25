@@ -61,6 +61,32 @@
     color: #ffffff;
 }
 
+/* BUG 7: Make bold visually distinguishable inside headings (which already use 600-700 weight) */
+.tiptap h1 strong,
+.tiptap h2 strong,
+.tiptap h3 strong,
+.tiptap h4 strong,
+.tiptap h5 strong,
+.tiptap h6 strong {
+    font-weight: 900;
+}
+
+/* BUG 8: Ensure bold renders even when text has color applied via TextStyle mark */
+.tiptap span[style*="color"] strong,
+.tiptap strong span[style*="color"],
+.tiptap [style*="color"] strong {
+    font-weight: 700 !important;
+}
+
+.tiptap h1 [style*="color"] strong,
+.tiptap h2 [style*="color"] strong,
+.tiptap h3 [style*="color"] strong,
+.tiptap h1 strong [style*="color"],
+.tiptap h2 strong [style*="color"],
+.tiptap h3 strong [style*="color"] {
+    font-weight: 900 !important;
+}
+
 .tiptap em {
     font-style: italic;
 }

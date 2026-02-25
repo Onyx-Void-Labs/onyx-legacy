@@ -1,7 +1,7 @@
 
 export type NoteType =
     | 'note'       // Default — plain document (📄)
-    | 'topic'      // Topic / subject grouper (🗂)
+    | 'topic'      // Topic / subject grouper (📖)
     | 'idea'       // Idea / brainstorm (💡)
     | 'task'       // Task-centric note (✅)
     | 'resource'   // Reference / link collection (🔗)
@@ -33,7 +33,7 @@ export interface FileMeta {
     properties?: Record<string, any>;
 }
 
-export type TemplateType = 'lecture-notes' | 'lab-report' | 'essay-outline' | 'meeting-notes' | 'study-guide' | 'project-plan';
+export type TemplateType = 'lecture-notes' | 'lab-report' | 'essay-outline' | 'meeting-notes' | 'study-guide' | 'project-plan' | 'cornell-notes' | 'weekly-planner' | 'research-paper' | 'daily-journal';
 
 export interface QueryConfig {
     filterSubject?: string;

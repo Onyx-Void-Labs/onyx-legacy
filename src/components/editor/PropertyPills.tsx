@@ -9,6 +9,7 @@ export default function PropertyPills({ meta, onClick }: PropertyPillsProps) {
     const pills: { label: string; value: string }[] = [];
 
     if (meta.subject) pills.push({ label: 'Subject', value: meta.subject });
+    if (meta.tags && meta.tags.length > 0) pills.push({ label: 'Tags', value: meta.tags.join(', ') });
     if (meta.week !== undefined && meta.week !== null) pills.push({ label: 'Week', value: String(meta.week) });
     if (meta.module) pills.push({ label: 'Module', value: meta.module });
     if (meta.type === 'task') {
@@ -41,16 +42,16 @@ export default function PropertyPills({ meta, onClick }: PropertyPillsProps) {
 
     return (
         <div
-            className="flex flex-wrap gap-1.5 cursor-pointer"
+            className="flex flex-wrap gap-1.5 cursor-pointer group/pills"
             onClick={onClick}
             title="Click to edit properties"
         >
             {pills.map(({ label, value }) => (
                 <span
                     key={label}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-300/80 border border-violet-500/10 hover:border-violet-500/20 transition-colors"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-zinc-800/60 text-zinc-400 border border-zinc-700/30 hover:border-zinc-600/40 hover:text-zinc-300 transition-colors"
                 >
-                    <span className="font-semibold text-zinc-500">{label}:</span>
+                    <span className="font-medium text-zinc-500">{label}:</span>
                     <span>{value}</span>
                 </span>
             ))}
