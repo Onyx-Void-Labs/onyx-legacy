@@ -43,6 +43,7 @@ pnpm-debug.log*
 # ── Editor ──────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
+.github/workflows/copilot-instructions.md
 .idea
 *.suo
 *.ntvs*
