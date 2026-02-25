@@ -1,60 +1,43 @@
-# 💎 ONYX Notes
+# ONYX.
 
-A modular, blazing-fast, local-first note-taking app for privacy, beauty, and deep study. Built with **Tauri**, **React**, **TipTap**, and **Yjs** for collaborative, native-like performance across Windows, macOS, and Linux.
+A privacy-first, local-first note-taking app for students and deep thinkers.
+Built with Tauri, React, and TipTap.
 
-> **Current Version:** `v0.0.2-alpha`
+> Currently in alpha. Expect rough edges.
 
----
+## What it is
 
-## 🚀 Features
+Onyx is a desktop note-taking app that tries to be genuinely useful for
+studying — not just pretty. It combines a rich-text editor, spaced repetition
+flashcards, task management, and real-time collaboration in one offline-first
+app that keeps your data on your device.
 
-### ✨ Core Engine
-- **TipTap Editor:** Rich-text editing powered by TipTap 3, with custom extensions and nodes.
-- **Hybrid Markdown:** Markdown syntax is hidden while you type, giving a seamless rich-text feel with plain-text portability.
-- **Math Support:** Full LaTeX with KaTeX. `$...$` for inline, `$$...$$` for blocks.
-- **Smart Lists:** Auto-indenting bullets & numbers.
-- **Code Folding:** Collapse headers/sections for focus.
+## Stack
 
-### 🔍 Search
-- **Live Indexing:** Zero-latency, strict matching—no fuzzy guessing.
-- **Native Highlights:** Matches feel like real text selection.
+| Layer | Technology |
+|---|---|
+| Desktop | Tauri v2 (Rust) |
+| Frontend | React + TypeScript + Tailwind CSS |
+| Editor | TipTap 3 |
+| Sync | Yjs + Hocuspocus WebSocket |
+| Storage | IndexedDB (local-first) |
+| Encryption | AES-256-GCM, PBKDF2 |
 
-### 🔒 Security & Privacy
-- **Local-First:** Your data stays on your device.
-- **AES-256-GCM Encryption:** Lock notes, password-protected at rest.
+## Features
 
-### 🤝 Real-Time Collaboration
-- **Yjs CRDT:** Real-time sync and collaboration, powered by Yjs and Hocuspocus WebSocket server.
-- **Offline-first:** Changes sync automatically when online.
+- **Rich text editor** — headings, tables, math (KaTeX), code blocks,
+  checklists, callouts, note linking with `+`
+- **Flashcard system** — 5 card types (basic, fill-in-blank, MCQ, matching,
+  cloze) with FSRS spaced repetition
+- **Today dashboard** — tasks due today, overdue, scheduled, and backlog
+- **Properties panel** — 18 field types per note (dates, status, relations, etc.)
+- **Query views** — list, grid, board, and calendar views per note type
+- **Encryption** — lock your vault with a password
+- **Real-time collaboration** — Yjs CRDT sync via Hocuspocus
 
-### 🎨 UI/UX
-- **Discord-inspired Dark Mode**
-- **Fluid Tabs:** Browser-grade drag & drop (dnd-kit, FLIP animations).
-- **Glassmorphism:** Subtle translucency, smooth transitions.
+## Getting started
 
-### 🛠 Infrastructure
-- **Auto-Updater:** Background updates, always fresh.
-- **Cross-Platform:** Native builds for Windows (`.exe`), macOS (`.dmg`), Linux (`.deb`).
-
----
-
-## 🗺 Roadmap
-
-- [ ] **Mobile App:** Native Android (tablet/phone)
-- [ ] **Encrypted Cloud Sync:** Git/S3/WebDAV
-- [ ] **Command Palette:** `Ctrl+Shift+P` for keyboard control
-- [ ] **Plugin System:** Community extension API
-- [ ] **Export:** PDF & HTML with themes
-
----
-
-## 🛠️ Setup & Development
-
-### Prerequisites
-- [Node.js](https://nodejs.org/) (Latest LTS)
-- [Rust](https://www.rust-lang.org/tools/install) (for Tauri)
-
-### Quickstart
+**Prerequisites:** Node.js (LTS), Rust
 
 ```bash
 git clone https://github.com/Onyx-Void-Labs/onyx.git
@@ -62,21 +45,34 @@ cd onyx
 npm install
 npm run tauri dev
 ```
-*Runs React frontend, TipTap editor, Yjs sync, and Tauri backend with hot reload.*
 
-### Build for Production
+**Build for production:**
 
 ```bash
 npm run tauri build
+# Output: src-tauri/target/release/bundle/
 ```
-*Binaries in `src-tauri/target/release/bundle`*
+
+## Project structure
+
+```
+onyx/
+├── src/                  # React frontend
+│   └── components/       # editor, flashcards, layout, modals, etc.
+├── src-tauri/            # Rust + Tauri config
+├── infrastructure/       # VPS server (Hocuspocus, deploy scripts)
+└── docs/                 # Documentation
+```
+
+## Status
+
+`v0.0.2-alpha` — core editor and study tools are working.
+Active development, not yet ready for daily use.
+
+## License
+
+GPL-3.0 — see [LICENSE](./LICENSE)
 
 ---
 
-## 🤝 Contributing
-
-ONYX is open source and active—issues and PRs welcome!
-
----
-
-*Created by [Omar Itani](https://github.com/om-itani)*
+Created by [Omar Itani](https://github.com/om-itani)
