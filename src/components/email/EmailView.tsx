@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { listen } from '@tauri-apps/api/event';
 import { start, cancel, onUrl } from '@fabianlars/tauri-plugin-oauth';
 import {
     Inbox, Send, Star, Trash2, Archive, Clock, Paperclip, Search,
     MailPlus, Shield, RefreshCw, ChevronLeft, Reply, ReplyAll, Forward,
-    X, AlertCircle, Plus, Loader2
+    X, AlertCircle, Plus, Loader2, ExternalLink
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ type Folder = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ACCOUNTS_STORAGE_KEY = 'onyx-email-accounts';
+const ACCOUNTS_CREDS_KEY = 'onyx-email-creds';
 const POLL_INTERVAL = 60_000; // 60 seconds
 
 const DEFAULT_FOLDERS: Folder[] = [
@@ -189,6 +191,18 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
         .replace(/=+$/, '');
+}
+
+// ─── Helper: Detect Outlook realm from email domain ──────────────────────────
+
+function getOutlookRealm(email: string): string | null {
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) return null;
+    // RMIT University
+    if (domain.includes('rmit.edu.au')) return 'student.rmit.edu.au';
+    // Generic .edu / .edu.au — use the domain itself as realm
+    if (domain.endsWith('.edu') || domain.endsWith('.edu.au') || domain.endsWith('.ac.uk')) return domain;
+    return null;
 }
 
 // ─── Email Cache (localStorage + E2EE) ────────────────────────────────────────
@@ -437,7 +451,30 @@ function AccountSetupModal({
             onAccountAdded(account);
             handleClose();
         } catch (err: any) {
-            setError(err.toString());
+            const errStr = err.toString();
+            setError(errStr);
+
+            // ── Outlook WebView fallback ──────────────────────────────────
+            // If the error looks like an IT / admin / consent block (common
+            // at universities like RMIT), offer the embedded Outlook WebView.
+            const blockedPatterns = ['admin', 'blocked', 'approval', 'consent', 'AADSTS', 'unauthorized_client', 'access_denied'];
+            const isBlocked = blockedPatterns.some(p => errStr.toLowerCase().includes(p.toLowerCase()));
+
+            // Detect redirect_uri mismatch (common Google OAuth error)
+            if (errStr.toLowerCase().includes('redirect_uri') || errStr.toLowerCase().includes('redirect_uri_mismatch')) {
+                setError(
+                    `OAuth redirect mismatch. Ensure these URIs are registered in your Google/Microsoft Console: ` +
+                    `http://localhost:17927, http://localhost:17928, http://localhost:17929, http://localhost:17930`
+                );
+            } else if (isBlocked && isTauri) {
+                setError('Your university/org IT blocks third-party apps. Opening Outlook inside Onyx instead!');
+
+                // Auto-open WebView after 2 seconds with realm detection
+                const realm = getOutlookRealm(email);
+                setTimeout(() => {
+                    invoke('open_outlook_onyx', { realm }).catch(e => console.error('[Outlook WebView]', e));
+                }, 2000);
+            }
         } finally {
             setOauthLoading(false);
             if (oauthPort !== null) {
@@ -579,6 +616,21 @@ function AccountSetupModal({
                                     ? 'Waiting for sign-in...'
                                     : `Sign in with ${providerConfig.provider_name}`}
                             </button>
+
+                            {/* Outlook WebView fallback — for uni/org-blocked OAuth */}
+                            {providerConfig.provider === 'Microsoft' && isTauri && (
+                                <button
+                                    onClick={() => {
+                                        const realm = getOutlookRealm(email);
+                                        invoke('open_outlook_onyx', { realm }).catch(e => console.error('[Outlook WebView]', e));
+                                        handleClose();
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors text-xs font-medium"
+                                >
+                                    <ExternalLink size={14} />
+                                    Open Outlook in Onyx (if sign-in is blocked)
+                                </button>
+                            )}
 
                             <button
                                 onClick={() => setStep('email')}
@@ -818,15 +870,10 @@ function ComposeModal({
 
 export default function EmailView() {
     // ─── State ────────────────────────────────────────────────────────────
-    const [accounts, setAccounts] = useState<EmailAccount[]>(() => {
-        try {
-            const saved = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
-            if (saved) return JSON.parse(saved);
-        } catch {}
-        return [];
-    });
+    const [accounts, setAccounts] = useState<EmailAccount[]>([]);
+    const [accountsLoaded, setAccountsLoaded] = useState(false);
 
-    const [activeAccountId, setActiveAccountId] = useState<string | null>(() => accounts[0]?.id || null);
+    const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
     const [activeFolder, setActiveFolder] = useState('INBOX');
     const [headers, setHeaders] = useState<EmailHeader[]>([]);
     const [selectedEmail, setSelectedEmail] = useState<EmailHeader | null>(null);
@@ -839,13 +886,76 @@ export default function EmailView() {
     const [searchQuery, setSearchQuery] = useState('');
     const [refreshing, setRefreshing] = useState(false);
 
+    const [outlookToast, setOutlookToast] = useState<string | null>(null);
+    const [outlookOpen, setOutlookOpen] = useState(false);
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
     const activeAccount = accounts.find(a => a.id === activeAccountId) || null;
 
-    // ─── Persist accounts ─────────────────────────────────────────────────
+    // ─── Listen for Outlook WebView events ─────────────────────────────
 
     useEffect(() => {
+        if (!isTauri) return;
+
+        const unlistenImport = listen<{ sender: string; subject: string; body: string }>(
+            'onyx-email-imported',
+            (event) => {
+                const { sender, subject } = event.payload;
+                setOutlookToast(`Imported: ${subject || '(no subject)'} from ${sender || 'unknown'}`);
+                setTimeout(() => setOutlookToast(null), 5000);
+            },
+        );
+
+        const unlistenOpened = listen('onyx-outlook-opened', () => setOutlookOpen(true));
+        const unlistenClosed = listen('onyx-outlook-closed', () => setOutlookOpen(false));
+
+        return () => {
+            unlistenImport.then(fn => fn());
+            unlistenOpened.then(fn => fn());
+            unlistenClosed.then(fn => fn());
+        };
+    }, [isTauri]);
+
+    // ─── Load accounts + encrypted credentials on mount ───────────────
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const metaStr = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+                if (!metaStr) { setAccountsLoaded(true); return; }
+
+                const meta: EmailAccount[] = JSON.parse(metaStr);
+
+                // Merge encrypted credentials (password, tokens)
+                const credsStr = localStorage.getItem(ACCOUNTS_CREDS_KEY);
+                if (credsStr) {
+                    try {
+                        const decrypted = await decryptFromStorage(credsStr);
+                        const creds: Record<string, Partial<EmailAccount>> = JSON.parse(decrypted);
+                        for (const a of meta) {
+                            const c = creds[a.id];
+                            if (c) Object.assign(a, c);
+                        }
+                    } catch (err) {
+                        console.warn('[Email] Could not decrypt credentials (key may have changed):', err);
+                    }
+                }
+
+                setAccounts(meta);
+                if (meta.length > 0) setActiveAccountId(meta[0].id);
+            } catch (err) {
+                console.error('[Email] Failed to load accounts:', err);
+            }
+            setAccountsLoaded(true);
+        })();
+    }, []);
+
+    // ─── Persist accounts + encrypted credentials ─────────────────────
+
+    useEffect(() => {
+        if (!accountsLoaded) return;
+
+        // Save metadata (non-sensitive) — backward compatible
         const sanitized = accounts.map(a => ({
             id: a.id,
             email: a.email,
@@ -858,7 +968,23 @@ export default function EmailView() {
             authMethod: a.authMethod,
         }));
         localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(sanitized));
-    }, [accounts]);
+
+        // Save credentials encrypted (AES-GCM with user key)
+        const creds: Record<string, Record<string, string>> = {};
+        for (const a of accounts) {
+            const c: Record<string, string> = {};
+            if (a.password) c.password = a.password;
+            if (a.accessToken) c.accessToken = a.accessToken;
+            if (a.refreshToken) c.refreshToken = a.refreshToken;
+            if (a.clientId) c.clientId = a.clientId;
+            if (Object.keys(c).length > 0) creds[a.id] = c;
+        }
+        encryptForStorage(JSON.stringify(creds)).then(encrypted => {
+            localStorage.setItem(ACCOUNTS_CREDS_KEY, encrypted);
+        }).catch(err => {
+            console.error('[Email] Failed to encrypt credentials:', err);
+        });
+    }, [accounts, accountsLoaded]);
 
     // ─── Fetch emails ─────────────────────────────────────────────────────
 
@@ -941,12 +1067,12 @@ export default function EmailView() {
     // ─── Load emails when account/folder changes ──────────────────────────
 
     useEffect(() => {
-        if (activeAccountId && activeFolder) {
+        if (accountsLoaded && activeAccountId && activeFolder) {
             fetchEmails(activeAccountId, activeFolder);
             setSelectedEmail(null);
             setEmailBody(null);
         }
-    }, [activeAccountId, activeFolder]);
+    }, [activeAccountId, activeFolder, accountsLoaded]);
 
     // ─── Polling (every 60s when in foreground) ───────────────────────────
 
@@ -1013,6 +1139,13 @@ export default function EmailView() {
             const remaining = accounts.filter(a => a.id !== id);
             setActiveAccountId(remaining[0]?.id || null);
         }
+        // Clean up cached emails for this account
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(`${EMAIL_CACHE_KEY}-${id}-`)) {
+                localStorage.removeItem(key);
+            }
+        }
     }, [accounts, activeAccountId]);
 
     // ─── Refresh handler ──────────────────────────────────────────────────
@@ -1055,6 +1188,18 @@ export default function EmailView() {
                             <Plus size={16} />
                             Add Email Account
                         </button>
+                        {isTauri && (
+                            <button
+                                onClick={() => {
+                                    const realm = activeAccount ? getOutlookRealm(activeAccount.email) : null;
+                                    invoke('open_outlook_onyx', { realm }).catch(e => console.error('[Outlook WebView]', e));
+                                }}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors text-xs font-medium"
+                            >
+                                <ExternalLink size={14} />
+                                Open Outlook in Onyx
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -1325,6 +1470,24 @@ export default function EmailView() {
                             )}
                         </div>
                     </>
+                ) : outlookOpen ? (
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="text-center space-y-3 max-w-xs">
+                            <div className="w-16 h-16 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto">
+                                <ExternalLink size={28} className="text-violet-400" />
+                            </div>
+                            <h3 className="text-base font-bold text-zinc-100">Outlook is open</h3>
+                            <p className="text-xs text-zinc-500 leading-relaxed">
+                                Outlook Web is running in an Onyx window. Use the purple toolbar in that window to import emails to your notes.
+                            </p>
+                            <button
+                                onClick={() => invoke('close_outlook_onyx').catch(() => {})}
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors text-xs font-medium"
+                            >
+                                Close Outlook WebView
+                            </button>
+                        </div>
+                    </div>
                 ) : (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="text-center space-y-2">
@@ -1349,6 +1512,22 @@ export default function EmailView() {
                 account={activeAccount}
                 replyTo={replyToEmail}
             />
+
+            {/* Outlook WebView import toast */}
+            {outlookToast && (
+                <div
+                    className="fixed bottom-6 right-6 z-99999 flex items-center gap-3 px-5 py-3 rounded-xl shadow-2xl text-sm font-medium text-white"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', boxShadow: '0 8px 32px rgba(139,92,246,0.4)' }}
+                >
+                    <span>✨ {outlookToast}</span>
+                    <button
+                        onClick={() => setOutlookToast(null)}
+                        className="ml-2 p-0.5 rounded hover:bg-white/20 transition-colors"
+                    >
+                        <X size={14} />
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

@@ -2,6 +2,7 @@ mod commands;
 mod database;
 mod email;
 mod email_client;
+mod onyx_outlook;
 mod p2p_sync;
 
 use database::Database;
@@ -12,6 +13,7 @@ use std::sync::Arc;
 use commands::*;
 use email::*;
 use email_client::*;
+use onyx_outlook::*;
 use p2p_sync::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -83,7 +85,12 @@ pub fn run() {
             fetch_email_headers,
             fetch_email_body,
             send_email,
-            list_email_folders
+            list_email_folders,
+            // Outlook WebView fallback commands
+            open_outlook_onyx,
+            close_outlook_onyx,
+            onyx_import_email,
+            outlook_console
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

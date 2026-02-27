@@ -20,6 +20,7 @@ import TrashView from "@/components/editor/TrashView";
 
 import { remove } from "@tauri-apps/plugin-fs";
 import { documentDir, join } from "@tauri-apps/api/path";
+import { listen } from "@tauri-apps/api/event";
 
 import { useSync } from "@/contexts/SyncContext";
 import { SettingsProvider, useSettings } from "@/contexts/SettingsContext";
@@ -69,6 +70,29 @@ function AppContent() {
       setUser(model);
     });
     return () => { unsubscribe(); };
+  }, []);
+
+  // ─── Forward console messages from embedded Outlook WebView ──────
+  useEffect(() => {
+    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    if (!isTauri) return;
+
+    let cancelled = false;
+    const unlistenPromise = listen<{ level: string; message: string }>(
+      'onyx-outlook-console',
+      (event) => {
+        if (cancelled) return;
+        const { level, message } = event.payload;
+        if (level === 'error') console.error('[Onyx Outlook]', message);
+        else if (level === 'warn') console.warn('[Onyx Outlook]', message);
+        else console.log('[Onyx Outlook]', message);
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      unlistenPromise.then((fn) => fn());
+    };
   }, []);
 
   // Process imported notes from onboarding
