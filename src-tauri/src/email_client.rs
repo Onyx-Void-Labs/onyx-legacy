@@ -278,7 +278,39 @@ pub async fn detect_email_provider(email: String) -> Result<ProviderConfig, Stri
             oauth_scopes: None,
         }),
         Err(_) => {
-            // Fallback: guess standard settings
+            // ISPDB miss — try MX-based detection (DNS-over-HTTPS)
+            if let Ok(mx_base) = resolve_mx_base_domain(&domain).await {
+                // Try ISPDB for the MX provider domain
+                if let Ok(config) = fetch_autoconfig(&mx_base, &local_part).await {
+                    return Ok(ProviderConfig {
+                        provider: EmailProvider::Custom,
+                        provider_name: mx_base.clone(),
+                        imap_host: config.imap_host,
+                        imap_port: config.imap_port,
+                        smtp_host: config.smtp_host,
+                        smtp_port: config.smtp_port,
+                        auth_method: AuthMethod::Password,
+                        oauth_auth_url: None,
+                        oauth_token_url: None,
+                        oauth_scopes: None,
+                    });
+                }
+                // ISPDB miss for MX domain too — guess imap/smtp from MX base
+                return Ok(ProviderConfig {
+                    provider: EmailProvider::Custom,
+                    provider_name: mx_base.clone(),
+                    imap_host: format!("imap.{}", mx_base),
+                    imap_port: 993,
+                    smtp_host: format!("smtp.{}", mx_base),
+                    smtp_port: 587,
+                    auth_method: AuthMethod::Password,
+                    oauth_auth_url: None,
+                    oauth_token_url: None,
+                    oauth_scopes: None,
+                });
+            }
+
+            // Final fallback: guess from original domain
             Ok(ProviderConfig {
                 provider: EmailProvider::Custom,
                 provider_name: domain.clone(),
@@ -292,6 +324,73 @@ pub async fn detect_email_provider(email: String) -> Result<ProviderConfig, Stri
                 oauth_scopes: None,
             })
         }
+    }
+}
+
+// ─── MX-based provider detection (DNS-over-HTTPS via Cloudflare) ─────────────
+
+/// Query MX records for `domain` via Cloudflare DoH and return the base domain
+/// of the highest-priority MX host (e.g. mailserver.purelymail.com → purelymail.com).
+async fn resolve_mx_base_domain(domain: &str) -> Result<String, String> {
+    let url = format!(
+        "https://cloudflare-dns.com/dns-query?name={}&type=MX",
+        domain
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/dns-json")
+        .send()
+        .await
+        .map_err(|e| format!("MX DoH query failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("MX DoH returned {}", response.status()));
+    }
+
+    let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+    // Parse the Answer array — each entry has "data": "10 mailserver.purelymail.com."
+    let answers = body["Answer"]
+        .as_array()
+        .ok_or("No MX answers")?;
+
+    let mut best_priority = u16::MAX;
+    let mut best_host = String::new();
+
+    for answer in answers {
+        if answer["type"].as_u64() != Some(15) {
+            // type 15 = MX
+            continue;
+        }
+        if let Some(data) = answer["data"].as_str() {
+            let parts: Vec<&str> = data.split_whitespace().collect();
+            if parts.len() == 2 {
+                let priority: u16 = parts[0].parse().unwrap_or(u16::MAX);
+                let host = parts[1].trim_end_matches('.');
+                if priority < best_priority {
+                    best_priority = priority;
+                    best_host = host.to_lowercase();
+                }
+            }
+        }
+    }
+
+    if best_host.is_empty() {
+        return Err("No valid MX record found".to_string());
+    }
+
+    // Extract base domain: take last two labels (e.g. mailserver.purelymail.com → purelymail.com)
+    let labels: Vec<&str> = best_host.split('.').collect();
+    if labels.len() >= 2 {
+        Ok(format!("{}.{}", labels[labels.len() - 2], labels[labels.len() - 1]))
+    } else {
+        Ok(best_host)
     }
 }
 

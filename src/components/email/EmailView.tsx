@@ -89,10 +89,7 @@ const DEFAULT_FOLDERS: Folder[] = [
     { icon: Trash2, label: 'Trash', imapName: '[Gmail]/Trash', count: 0 },
 ];
 
-// ─── OAuth Client IDs (public / native — no secret needed) ────────────────────
-
-const GOOGLE_CLIENT_ID = ''; // Fill in a real client ID for production
-const MICROSOFT_CLIENT_ID = ''; // Fill in a real client ID for production
+// ─── OAuth Client IDs (read from .env — public / native, no secret needed) ───
 
 // ─── Helper: Encrypt for IndexedDB storage ────────────────────────────────────
 
@@ -338,34 +335,27 @@ function AccountSetupModal({
             let clientId: string;
 
             if (providerConfig.provider === 'Gmail') {
-                clientId = GOOGLE_CLIENT_ID;
-                const scopes = encodeURIComponent(
-                    'https://mail.google.com/ openid email'
-                );
+                clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
                 authUrl =
                     `https://accounts.google.com/o/oauth2/v2/auth` +
                     `?client_id=${encodeURIComponent(clientId)}` +
                     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+                    `&scope=${encodeURIComponent('https://mail.google.com/')}` +
                     `&response_type=code` +
-                    `&scope=${scopes}` +
                     `&code_challenge=${codeChallenge}` +
-                    `&code_challenge_method=S256` +
-                    `&access_type=offline` +
-                    `&prompt=consent`;
+                    `&code_challenge_method=S256`;
             } else {
-                // Microsoft
-                clientId = MICROSOFT_CLIENT_ID;
-                const scopes = encodeURIComponent(
-                    'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access openid email'
-                );
+                // Microsoft Graph
+                clientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID;
                 authUrl =
                     `https://login.microsoftonline.com/common/oauth2/v2.0/authorize` +
                     `?client_id=${encodeURIComponent(clientId)}` +
                     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+                    `&scope=${encodeURIComponent('https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send offline_access')}` +
                     `&response_type=code` +
-                    `&scope=${scopes}` +
                     `&code_challenge=${codeChallenge}` +
-                    `&code_challenge_method=S256`;
+                    `&code_challenge_method=S256` +
+                    `&prompt=consent`;
             }
 
             // 4) Set up URL listener to receive the OAuth redirect
