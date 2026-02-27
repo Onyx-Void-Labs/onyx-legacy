@@ -150,7 +150,7 @@ jobs:
 
   release:
     name: Release
-    needs: tauri-build
+    needs: [tauri-build, tauri-build-android]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -160,52 +160,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get version
+        id: version
+        run: echo "version=$(jq -r '.version' src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Set release tag
-        id: tag
-        run: echo "tag=v0.0.2-build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - name: List artifacts for debugging
+        run: find artifacts -type f | head -100
 
-      - name: Create git tag
+      - name: Collect release assets
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -f "${{ steps.tag.outputs.tag }}"
-          git push origin "${{ steps.tag.outputs.tag }}" --force
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          mkdir -p release-assets/
 
-      - name: Create or update GitHub Release
-        run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-
-          # Only collect actual distributable files (skip icons, metadata, etc.)
-          FILES=$(find artifacts -type f \( \
+          # Collect all distributable files into a flat folder
+          find artifacts -type f \( \
             -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
             -o -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
             -o -name '*.msi' -o -name '*.exe' -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \
             -o -name '*.apk' -o -name '*.aab' \
-            -o -name '*.sig' -o -name '*.json' \
-          \) | tr '\n' ' ')
-          if [ -z "$FILES" ]; then
-            echo "::warning::No distributable files found — skipping release upload."
-            exit 0
-          fi
-          echo "Found files: $FILES"
+          \) -exec cp {} release-assets/ \;
 
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Release $TAG exists — uploading assets..."
-            echo "$FILES" | xargs gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            echo "Creating release $TAG..."
-            echo "$FILES" | xargs gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Release $TAG" \
-              --notes "Automated release from CI build #${{ github.run_number }}" \
-              --draft
+          echo "=== Release assets ==="
+          ls -la release-assets/
+
+          if [ -z "$(ls -A release-assets/)" ]; then
+            echo "::warning::No distributable files found"
           fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Build #${{ github.run_number }} (${{ steps.sha.outputs.short }})"
+          body: |
+            **Automated build from [`${{ steps.sha.outputs.short }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})**
+
+            Version: `v${{ steps.version.outputs.version }}`
+            Branch: `main`
+            Run: [#${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ### Platforms
+            - Windows (`.exe`, `.msi`)
+            - macOS (`.dmg`)
+            - Linux (`.deb`, `.rpm`, `.AppImage`)
+            - Android (`.apk`)
+          draft: true
+          prerelease: false
+          files: release-assets/*
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
