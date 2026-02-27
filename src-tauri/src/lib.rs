@@ -1,6 +1,8 @@
 mod commands;
 mod database;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod email;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod email_client;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod onyx_outlook;
@@ -12,7 +14,9 @@ use std::sync::Arc;
 
 // We "use" everything from the commands module so the generate_handler can see them
 use commands::*;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use email::*;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use email_client::*;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use onyx_outlook::*;
@@ -49,6 +53,123 @@ mod outlook_stubs {
     pub fn outlook_console(_level: String, _message: String) -> Result<(), String> {
         Ok(()) // silently ignore console forwarding on Android
     }
+
+    // Email relay stubs (reqwest not available on mobile)
+    #[tauri::command]
+    pub async fn send_magic_link_email(_email: String, _link: String) -> Result<String, String> {
+        Err("Email relay is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn send_otp_email(_email: String, _code: String) -> Result<String, String> {
+        Err("Email relay is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn check_relay_health() -> Result<String, String> {
+        Err("Email relay is not available on mobile".to_string())
+    }
+
+    // Email client stubs (imap/lettre/reqwest not available on mobile)
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ProviderConfig {
+        pub provider: String,
+        pub imap_host: String,
+        pub imap_port: u16,
+        pub smtp_host: String,
+        pub smtp_port: u16,
+        pub auth_type: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct OAuthTokens {
+        pub access_token: String,
+        pub refresh_token: Option<String>,
+        pub expires_in: Option<u64>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct EmailHeader {
+        pub uid: u32,
+        pub subject: String,
+        pub from: String,
+        pub date: String,
+        pub flags: Vec<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct EmailBody {
+        pub uid: u32,
+        pub subject: String,
+        pub from: String,
+        pub date: String,
+        pub text: Option<String>,
+        pub html: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct EmailFolder {
+        pub name: String,
+        pub delimiter: String,
+    }
+
+    /// Placeholder EmailManager for mobile — no-op
+    pub struct EmailManager;
+    impl EmailManager {
+        pub fn new() -> Self { EmailManager }
+    }
+
+    #[tauri::command]
+    pub async fn detect_email_provider(_email: String) -> Result<ProviderConfig, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn exchange_oauth_code(
+        _provider: String, _code: String, _redirect_uri: String,
+    ) -> Result<OAuthTokens, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn refresh_oauth_token(
+        _provider: String, _refresh_token: String,
+    ) -> Result<OAuthTokens, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn fetch_email_headers(
+        _host: String, _port: u16, _username: String, _access_token: String,
+        _auth_type: String, _folder: Option<String>, _page: Option<u32>, _per_page: Option<u32>,
+    ) -> Result<Vec<EmailHeader>, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn fetch_email_body(
+        _host: String, _port: u16, _username: String, _access_token: String,
+        _auth_type: String, _uid: u32, _folder: Option<String>,
+    ) -> Result<EmailBody, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn send_email(
+        _smtp_host: String, _smtp_port: u16, _username: String, _access_token: String,
+        _auth_type: String, _from: String, _to: String, _subject: String, _body: String,
+        _html: Option<bool>,
+    ) -> Result<String, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn list_email_folders(
+        _host: String, _port: u16, _username: String, _access_token: String,
+        _auth_type: String,
+    ) -> Result<Vec<EmailFolder>, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -81,7 +202,7 @@ pub fn run() {
             app.manage(p2p_manager.clone());
 
             // Initialize Email manager
-            let email_manager = Arc::new(email_client::EmailManager::new());
+            let email_manager = Arc::new(EmailManager::new());
             app.manage(email_manager);
 
             // Handle close event — flush P2P ops (desktop only, mobile has no close event)
