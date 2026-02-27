@@ -3,6 +3,7 @@ import { Minus, Square, X, PanelLeftClose, PanelLeft, PenLine, MessageCircle, Ca
 import { useState, useRef, useEffect } from 'react';
 import { useWorkspace, MODULE_ORDER, MODULES, type WorkspaceModule } from '../../contexts/WorkspaceContext';
 import { useSettings } from '../../contexts/SettingsContext';
+import SyncStatusIndicator from './SyncStatusIndicator';
 
 // Map module IDs → Lucide icon components
 const MODULE_ICONS: Record<WorkspaceModule, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -287,6 +288,7 @@ export default function Titlebar({ sidebarCollapsed, onToggleSidebar }: Titlebar
                 </div>
 
                 {/* Window Controls — hidden in demo mode */}
+                <SyncStatusIndicator />
                 {!import.meta.env.VITE_DEMO_MODE && (
                     <>
                         <button onClick={handleMinimize} className="h-full w-11 flex items-center justify-center hover:bg-zinc-800 text-zinc-500 hover:text-zinc-200 transition-colors">

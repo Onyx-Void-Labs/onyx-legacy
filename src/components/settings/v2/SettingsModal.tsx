@@ -10,6 +10,7 @@ import AboutTab from './tabs/AboutTab.tsx';
 import FeaturesTab from './tabs/FeaturesTab.tsx';
 import DataTab from './tabs/DataTab.tsx';
 import SecurityTab from './tabs/SecurityTab.tsx';
+import SyncTab from './tabs/SyncTab.tsx';
 
 interface SettingsModalProps {
     user: any;
@@ -71,6 +72,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
                         {activeTab === 'shortcuts' && <KeybindsTab />}
                         {activeTab === 'features' && <FeaturesTab />}
                         {activeTab === 'storage' && <DataTab />}
+                        {activeTab === 'sync' && <SyncTab />}
                         {activeTab === 'about' && <AboutTab />}
                     </div>
                 </div>

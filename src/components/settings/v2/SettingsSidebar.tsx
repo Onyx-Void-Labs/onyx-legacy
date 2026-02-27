@@ -1,4 +1,4 @@
-import { User, Palette, Code, Database, Zap, Info, Cpu, Key, Shield } from 'lucide-react';
+import { User, Palette, Code, Database, Zap, Info, Cpu, Key, Shield, RefreshCw } from 'lucide-react';
 
 interface SettingsSidebarProps {
     activeTab: string;
@@ -35,6 +35,7 @@ export default function SettingsSidebar({ activeTab, setActiveTab, user }: Setti
                 { id: 'shortcuts', label: 'Keybinds', icon: Key },
                 { id: 'features', label: 'Features', icon: Zap },
                 { id: 'storage', label: 'Data', icon: Database },
+                { id: 'sync', label: 'Sync & Email', icon: RefreshCw },
             ]
         },
     ];

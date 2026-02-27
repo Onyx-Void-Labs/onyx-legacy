@@ -4,6 +4,7 @@ import App from "./App";
 import "./index.css";
 import { SyncProvider } from "./contexts/SyncContext";
 import { VaultProvider } from "./contexts/VaultContext";
+import { P2PProvider } from "./contexts/P2PContext";
 
 // PREVENT RIGHT CLICK (CONTEXT MENU)
 document.addEventListener('contextmenu', (event) => {
@@ -14,9 +15,11 @@ document.addEventListener('contextmenu', (event) => {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <SyncProvider>
-      <VaultProvider>
-        <App />
-      </VaultProvider>
+      <P2PProvider>
+        <VaultProvider>
+          <App />
+        </VaultProvider>
+      </P2PProvider>
     </SyncProvider>
   </React.StrictMode>
 );

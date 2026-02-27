@@ -57,6 +57,8 @@
       ]
     },
     "oauth:allow-start",
-    "oauth:allow-cancel"
+    "oauth:allow-cancel",
+    "core:event:allow-listen",
+    "core:event:allow-emit"
   ]
 }
