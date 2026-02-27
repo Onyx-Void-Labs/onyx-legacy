@@ -579,7 +579,7 @@ function BasicReview({
 
 function FillBlankReview({
     card,
-    flipped,
+    flipped: _flipped,
     onFlip,
     showHint,
     hintUsed,
@@ -1604,7 +1604,6 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
                 opts.sentence = newRawSyntax.replace(clozeRegex, '$2');
                 const plainWords = opts.sentence.split(/\s+/);
                 const blankIndices: number[] = [];
-                let plainText = newRawSyntax;
                 for (const m of matches) {
                     const word = m[2].trim();
                     const idx = plainWords.indexOf(word);

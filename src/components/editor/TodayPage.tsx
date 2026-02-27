@@ -26,7 +26,6 @@ import {
     getSomeday,
     getThisWeek,
     getDueThisWeek,
-    getTodayJournal,
 } from '../../lib/today';
 import { useTodayStore } from '../../store/todayStore';
 import { useQuestionStore } from '../../store/questionStore';
@@ -99,7 +98,7 @@ export default function TodayPage({ onOpenNote: _onOpenNote }: TodayPageProps) {
 
     /* ── Today Store ─────────────────────────────────── */
     const {
-        logStudyMinutes,
+        // logStudyMinutes is used by external callers via the store
         getHeatmapData,
         getTodayMinutes,
         getStreak,
@@ -141,8 +140,11 @@ export default function TodayPage({ onOpenNote: _onOpenNote }: TodayPageProps) {
     const TaskRow = ({ task }: { task: FileMeta }) => {
         const badge = PRIORITY_BADGE[task.priority ?? 'low'];
         return (
-            <button
+            <div
                 onClick={() => _onOpenNote(task.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') _onOpenNote(task.id); }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-violet-500/5 transition-colors duration-150 text-left group cursor-pointer"
             >
                 <button
@@ -169,7 +171,7 @@ export default function TodayPage({ onOpenNote: _onOpenNote }: TodayPageProps) {
                     </span>
                 )}
                 <ArrowRight size={12} className="text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-            </button>
+            </div>
         );
     };
 

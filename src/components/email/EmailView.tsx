@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { start, cancel, onUrl } from '@fabianlars/tauri-plugin-oauth';
 import {
     Inbox, Send, Star, Trash2, Archive, Clock, Paperclip, Search,
     MailPlus, Shield, RefreshCw, ChevronLeft, Reply, ReplyAll, Forward,
-    MoreHorizontal, X, AlertCircle, Check, Plus, LogOut, User, Loader2
+    X, AlertCircle, Plus, Loader2
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +60,14 @@ interface ProviderConfig {
     oauth_scopes: string[] | null;
 }
 
+interface OAuthTokenResponse {
+    access_token: string;
+    refresh_token: string | null;
+    token_type: string;
+    expires_in: number | null;
+    scope: string | null;
+}
+
 type Folder = {
     icon: React.ComponentType<{ size?: number; className?: string }>;
     label: string;
@@ -78,6 +88,11 @@ const DEFAULT_FOLDERS: Folder[] = [
     { icon: Archive, label: 'Archive', imapName: '[Gmail]/All Mail', count: 0 },
     { icon: Trash2, label: 'Trash', imapName: '[Gmail]/Trash', count: 0 },
 ];
+
+// ─── OAuth Client IDs (public / native — no secret needed) ────────────────────
+
+const GOOGLE_CLIENT_ID = ''; // Fill in a real client ID for production
+const MICROSOFT_CLIENT_ID = ''; // Fill in a real client ID for production
 
 // ─── Helper: Encrypt for IndexedDB storage ────────────────────────────────────
 
@@ -161,6 +176,24 @@ function formatRelativeDate(dateStr: string): string {
     }
 }
 
+// ─── Helper: PKCE ─────────────────────────────────────────────────────────────
+
+function generateCodeVerifier(): string {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function generateCodeChallenge(verifier: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode(...new Uint8Array(digest)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+
 // ─── Email Cache (localStorage + E2EE) ────────────────────────────────────────
 
 const EMAIL_CACHE_KEY = 'onyx-email-cache';
@@ -209,6 +242,7 @@ function AccountSetupModal({
     const [manualImapPort, setManualImapPort] = useState('993');
     const [manualSmtpHost, setManualSmtpHost] = useState('');
     const [manualSmtpPort, setManualSmtpPort] = useState('587');
+    const [oauthLoading, setOauthLoading] = useState(false);
 
     const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 
@@ -251,7 +285,28 @@ function AccountSetupModal({
                         oauth_scopes: null,
                     });
                     setStep('provider');
+                } else if (
+                    domain === 'outlook.com' ||
+                    domain === 'hotmail.com' ||
+                    domain === 'live.com'
+                ) {
+                    setProviderConfig({
+                        provider: 'Microsoft',
+                        provider_name: 'Microsoft',
+                        imap_host: 'outlook.office365.com',
+                        imap_port: 993,
+                        smtp_host: 'smtp.office365.com',
+                        smtp_port: 587,
+                        auth_method: 'OAuth2',
+                        oauth_auth_url: null,
+                        oauth_token_url: null,
+                        oauth_scopes: null,
+                    });
+                    setStep('provider');
                 } else {
+                    // Bug 3 fix: use raw domain directly, never append .com
+                    setManualImapHost(`imap.${domain}`);
+                    setManualSmtpHost(`smtp.${domain}`);
                     setStep('manual');
                 }
             }
@@ -263,10 +318,117 @@ function AccountSetupModal({
     };
 
     const handleOAuthSign = async () => {
-        if (!providerConfig) return;
+        if (!providerConfig || !isTauri) return;
         setError('');
+        setOauthLoading(true);
+
+        let oauthPort: number | null = null;
 
         try {
+            // 1) Generate PKCE pair
+            const codeVerifier = generateCodeVerifier();
+            const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+            // 2) Start local OAuth redirect server
+            oauthPort = await start({ ports: [17927, 17928, 17929, 17930] });
+            const redirectUri = `http://localhost:${oauthPort}`;
+
+            // 3) Determine OAuth params based on provider
+            let authUrl: string;
+            let clientId: string;
+
+            if (providerConfig.provider === 'Gmail') {
+                clientId = GOOGLE_CLIENT_ID;
+                const scopes = encodeURIComponent(
+                    'https://mail.google.com/ openid email'
+                );
+                authUrl =
+                    `https://accounts.google.com/o/oauth2/v2/auth` +
+                    `?client_id=${encodeURIComponent(clientId)}` +
+                    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+                    `&response_type=code` +
+                    `&scope=${scopes}` +
+                    `&code_challenge=${codeChallenge}` +
+                    `&code_challenge_method=S256` +
+                    `&access_type=offline` +
+                    `&prompt=consent`;
+            } else {
+                // Microsoft
+                clientId = MICROSOFT_CLIENT_ID;
+                const scopes = encodeURIComponent(
+                    'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access openid email'
+                );
+                authUrl =
+                    `https://login.microsoftonline.com/common/oauth2/v2.0/authorize` +
+                    `?client_id=${encodeURIComponent(clientId)}` +
+                    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+                    `&response_type=code` +
+                    `&scope=${scopes}` +
+                    `&code_challenge=${codeChallenge}` +
+                    `&code_challenge_method=S256`;
+            }
+
+            // 4) Set up URL listener to receive the OAuth redirect
+            const tokenPromise = new Promise<OAuthTokenResponse>((resolve, reject) => {
+                let resolved = false;
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(new Error('OAuth timed out after 120 seconds'));
+                    }
+                }, 120_000);
+
+                onUrl(async (urlStr: string) => {
+                    if (resolved) return;
+                    try {
+                        const url = new URL(urlStr);
+                        const code = url.searchParams.get('code');
+                        const errorParam = url.searchParams.get('error');
+
+                        if (errorParam) {
+                            resolved = true;
+                            clearTimeout(timeout);
+                            reject(new Error(`OAuth error: ${errorParam}`));
+                            return;
+                        }
+
+                        if (!code) {
+                            resolved = true;
+                            clearTimeout(timeout);
+                            reject(new Error('No authorization code received'));
+                            return;
+                        }
+
+                        // Exchange code for token via Tauri command
+                        const tokenResponse = await invoke<OAuthTokenResponse>(
+                            'exchange_oauth_code',
+                            {
+                                provider: providerConfig.provider === 'Gmail' ? 'google' : 'microsoft',
+                                code,
+                                redirectUri,
+                                clientId,
+                                codeVerifier,
+                            }
+                        );
+
+                        resolved = true;
+                        clearTimeout(timeout);
+                        resolve(tokenResponse);
+                    } catch (err) {
+                        resolved = true;
+                        clearTimeout(timeout);
+                        reject(err);
+                    }
+                });
+            });
+
+            // 5) Open browser for user to sign in
+            await openUrl(authUrl);
+
+            // 6) Wait for the token exchange to complete
+            const tokenResponse = await tokenPromise;
+
+            // 7) Build account with access token
             const account: EmailAccount = {
                 id: crypto.randomUUID(),
                 email,
@@ -277,12 +439,20 @@ function AccountSetupModal({
                 smtpHost: providerConfig.smtp_host,
                 smtpPort: providerConfig.smtp_port,
                 authMethod: 'oauth2',
+                accessToken: tokenResponse.access_token,
+                refreshToken: tokenResponse.refresh_token ?? undefined,
+                clientId,
             };
 
             onAccountAdded(account);
             handleClose();
         } catch (err: any) {
             setError(err.toString());
+        } finally {
+            setOauthLoading(false);
+            if (oauthPort !== null) {
+                cancel(oauthPort).catch(() => {});
+            }
         }
     };
 
@@ -292,14 +462,18 @@ function AccountSetupModal({
             return;
         }
 
+        // Bug 3 fix: extract domain directly — never append .com or any suffix.
+        // Use the IMAP host from the input or fall back to imap.<domain>.
+        const domain = email.split('@')[1];
+
         const account: EmailAccount = {
             id: crypto.randomUUID(),
             email,
             displayName: email.split('@')[0],
             provider: 'Custom',
-            imapHost: manualImapHost || `imap.${email.split('@')[1]}`,
+            imapHost: manualImapHost || `imap.${domain}`,
             imapPort: parseInt(manualImapPort) || 993,
-            smtpHost: manualSmtpHost || `smtp.${email.split('@')[1]}`,
+            smtpHost: manualSmtpHost || `smtp.${domain}`,
             smtpPort: parseInt(manualSmtpPort) || 587,
             authMethod: 'password',
             password: manualPassword,
@@ -315,6 +489,7 @@ function AccountSetupModal({
         setProviderConfig(null);
         setError('');
         setManualPassword('');
+        setOauthLoading(false);
         onClose();
     };
 
@@ -406,9 +581,13 @@ function AccountSetupModal({
 
                             <button
                                 onClick={handleOAuthSign}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors text-sm font-semibold"
+                                disabled={oauthLoading}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-semibold"
                             >
-                                Sign in with {providerConfig.provider_name}
+                                {oauthLoading ? <Loader2 size={16} className="animate-spin" /> : null}
+                                {oauthLoading
+                                    ? 'Waiting for sign-in...'
+                                    : `Sign in with ${providerConfig.provider_name}`}
                             </button>
 
                             <button
@@ -697,6 +876,12 @@ export default function EmailView() {
         const acct = accounts.find(a => a.id === (accountId || activeAccountId));
         if (!acct) return;
 
+        // Bug 1 guard: if this is an OAuth account without a token, do not fetch
+        if (acct.authMethod === 'oauth2' && !acct.accessToken) {
+            console.warn('[Email] Skipping fetch — no access token for OAuth account');
+            return;
+        }
+
         const targetFolder = folder || activeFolder;
         setLoading(true);
 
@@ -736,6 +921,12 @@ export default function EmailView() {
 
     const fetchBody = useCallback(async (uid: number) => {
         if (!activeAccount || !isTauri) return;
+
+        // Guard: no token for OAuth → skip
+        if (activeAccount.authMethod === 'oauth2' && !activeAccount.accessToken) {
+            console.warn('[Email] Skipping body fetch — no access token');
+            return;
+        }
 
         setLoadingBody(true);
         try {
@@ -795,6 +986,11 @@ export default function EmailView() {
         references?: string,
     ) => {
         if (!activeAccount || !isTauri) throw new Error('No active account');
+
+        // Guard: no token for OAuth send
+        if (activeAccount.authMethod === 'oauth2' && !activeAccount.accessToken) {
+            throw new Error('No access token — please sign in again');
+        }
 
         await invoke('send_email', {
             smtpHost: activeAccount.smtpHost,
@@ -904,10 +1100,13 @@ export default function EmailView() {
                         Accounts
                     </div>
                     {accounts.map(account => (
-                        <button
+                        <div
                             key={account.id}
+                            role="button"
+                            tabIndex={0}
                             onClick={() => setActiveAccountId(account.id)}
-                            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-colors group ${
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveAccountId(account.id); }}
+                            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-colors group cursor-pointer ${
                                 activeAccountId === account.id
                                     ? 'bg-amber-500/10 text-zinc-200'
                                     : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
@@ -923,7 +1122,7 @@ export default function EmailView() {
                             >
                                 <X size={10} />
                             </button>
-                        </button>
+                        </div>
                     ))}
                     <button
                         onClick={() => setSetupOpen(true)}

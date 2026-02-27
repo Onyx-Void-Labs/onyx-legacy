@@ -1,15 +1,6 @@
 import '@testing-library/jest-dom';
 
 // Mock IndexedDB for tests
-// Minimal IndexedDB mock for service tests
-const stores = new Map<string, Map<string, unknown>>();
-
-beforeAll((_done) => {
-    // ...existing code...
-});
-import '@testing-library/jest-dom';
-
-// Mock IndexedDB for tests
 import { vi } from 'vitest';
 
 // Minimal IndexedDB mock for service tests
@@ -28,11 +19,9 @@ class MockIDBRequest {
 }
 
 class MockIDBObjectStore {
-    private name: string;
     private data: Map<string, unknown>;
 
     constructor(name: string) {
-        this.name = name;
         this.data = stores.get(name) ?? new Map();
         stores.set(name, this.data);
     }

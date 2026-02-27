@@ -321,7 +321,7 @@ function BoardView({
 /* ─── Calendar View ───────────────────────────────────────── */
 
 function CalendarView({
-    notes, type, onOpenNote,
+    notes, type: _type, onOpenNote,
 }: {
     notes: FileMeta[]; type: NoteType; onOpenNote: (id: string) => void;
 }) {

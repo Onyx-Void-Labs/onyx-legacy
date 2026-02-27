@@ -259,7 +259,12 @@ pub async fn detect_email_provider(email: String) -> Result<ProviderConfig, Stri
     }
 
     // Attempt Thunderbird autoconfig (ISPDB)
-    match fetch_autoconfig(&domain).await {
+    let local_part = email
+        .split('@')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    match fetch_autoconfig(&domain, &local_part).await {
         Ok(config) => Ok(ProviderConfig {
             provider: EmailProvider::Custom,
             provider_name: domain.clone(),
@@ -292,7 +297,7 @@ pub async fn detect_email_provider(email: String) -> Result<ProviderConfig, Stri
 
 // ─── Thunderbird Autoconfig (ISPDB) ──────────────────────────────────────────
 
-async fn fetch_autoconfig(domain: &str) -> Result<AutoconfigResult, String> {
+async fn fetch_autoconfig(domain: &str, local_part: &str) -> Result<AutoconfigResult, String> {
     let url = format!(
         "https://autoconfig.thunderbird.net/v1.1/{}",
         domain
@@ -316,10 +321,10 @@ async fn fetch_autoconfig(domain: &str) -> Result<AutoconfigResult, String> {
     let text = response.text().await.map_err(|e| e.to_string())?;
 
     // Parse the XML response to extract IMAP/SMTP settings
-    parse_autoconfig_xml(&text)
+    parse_autoconfig_xml(&text, domain, local_part)
 }
 
-fn parse_autoconfig_xml(xml: &str) -> Result<AutoconfigResult, String> {
+fn parse_autoconfig_xml(xml: &str, domain: &str, local_part: &str) -> Result<AutoconfigResult, String> {
     // Simple XML parser for Thunderbird autoconfig format
     let mut imap_host = String::new();
     let mut imap_port = 993u16;
@@ -382,6 +387,14 @@ fn parse_autoconfig_xml(xml: &str) -> Result<AutoconfigResult, String> {
     if imap_host.is_empty() {
         return Err("Could not find IMAP settings in autoconfig".to_string());
     }
+
+    // Replace Thunderbird ISPDB placeholders in hostnames
+    imap_host = imap_host
+        .replace("%EMAILDOMAIN%", domain)
+        .replace("%EMAILLOCALPART%", local_part);
+    smtp_host = smtp_host
+        .replace("%EMAILDOMAIN%", domain)
+        .replace("%EMAILLOCALPART%", local_part);
 
     Ok(AutoconfigResult {
         imap_host,
