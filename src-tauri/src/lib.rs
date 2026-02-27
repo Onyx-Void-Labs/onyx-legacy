@@ -38,7 +38,8 @@ pub fn run() {
             delete_note,
             delete_note_by_pb_id,
             ensure_local_uuid,
-            move_to_trash
+            move_to_trash,
+            transcribe_audio
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

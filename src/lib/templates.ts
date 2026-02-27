@@ -315,6 +315,133 @@ const dailyJournal: JSONContent = {
     ],
 };
 
+/* ─── ADHD-Focused Templates ────────────────────────────────── */
+
+const bodyDoubling: JSONContent = {
+    type: 'doc',
+    content: [
+        heading(1, 'Body Doubling Session'),
+        boldParagraph('Date: ', ' | Partner: '),
+        boldParagraph('Session Length: ', ' 25 min'),
+        paragraph(),
+        heading(2, '🎯 What I\'m Working On'),
+        paragraph('Describe your task in ONE sentence. Be specific.'),
+        paragraph(),
+        heading(2, '✅ Before We Start'),
+        taskList([
+            'Task is broken into small steps (below)',
+            'Distractions removed (phone away, tabs closed)',
+            'Water / snack ready',
+            'Timer set',
+        ]),
+        paragraph(),
+        heading(2, '📋 Micro-Steps'),
+        paragraph('Break your task into the smallest possible actions:'),
+        taskList([
+            'Step 1: ',
+            'Step 2: ',
+            'Step 3: ',
+            'Step 4: ',
+            'Step 5: ',
+        ]),
+        paragraph(),
+        heading(2, '🧠 Parking Lot'),
+        paragraph('Stray thoughts? Park them here instead of acting on them:'),
+        bulletList(['']),
+        paragraph(),
+        heading(2, '🏁 Session Debrief'),
+        boldParagraph('What I accomplished: '),
+        boldParagraph('What blocked me: '),
+        boldParagraph('Energy level (1-5): '),
+        boldParagraph('Next session focus: '),
+    ],
+};
+
+const brainDump: JSONContent = {
+    type: 'doc',
+    content: [
+        heading(1, '🧠 Brain Dump'),
+        boldParagraph('Date: '),
+        paragraph('Set a timer for 5-10 minutes. Write EVERYTHING on your mind — no filtering, no organising. Just dump it all out.'),
+        paragraph(),
+        heading(2, '💭 Everything On My Mind'),
+        paragraph(),
+        paragraph(),
+        paragraph(),
+        paragraph(),
+        paragraph(),
+        heading(2, '🏷️ Sort It Out'),
+        paragraph('Now go through what you wrote and sort each item:'),
+        paragraph(),
+        heading(3, '🔴 Do Today'),
+        taskList(['', '']),
+        paragraph(),
+        heading(3, '🟡 Do This Week'),
+        taskList(['', '']),
+        paragraph(),
+        heading(3, '🟢 Someday / Maybe'),
+        bulletList(['', '']),
+        paragraph(),
+        heading(3, '🗑️ Let Go'),
+        paragraph('Things that don\'t actually need action — cross them off mentally:'),
+        bulletList(['', '']),
+        paragraph(),
+        heading(2, '🌟 The ONE Thing'),
+        paragraph('If I could only do one thing today, it would be:'),
+        paragraph(),
+    ],
+};
+
+const timeBoxing: JSONContent = {
+    type: 'doc',
+    content: [
+        heading(1, '⏱️ Time-Boxing Plan'),
+        boldParagraph('Date: '),
+        boldParagraph('Total Available Time: ', ' hours'),
+        paragraph(),
+        heading(2, '📦 Time Blocks'),
+        paragraph('Assign specific tasks to specific time slots. When the time is up, STOP and move on.'),
+        paragraph(),
+        table(
+            ['Time', 'Task', 'Status'],
+            [
+                ['9:00 – 9:25', '', ''],
+                ['9:30 – 9:55', '', ''],
+                ['10:00 – 10:15', '☕ Break', ''],
+                ['10:15 – 10:40', '', ''],
+                ['10:45 – 11:10', '', ''],
+                ['11:15 – 11:30', '☕ Break', ''],
+                ['11:30 – 11:55', '', ''],
+                ['12:00 – 12:25', '', ''],
+            ]
+        ),
+        paragraph(),
+        heading(2, '📐 Rules'),
+        bulletList([
+            '25-minute blocks (Pomodoro style)',
+            'When the timer rings, STOP — even mid-sentence',
+            '5-minute breaks between blocks, 15-minute break every 4 blocks',
+            'If you finish early, use remaining time for review or rest',
+            'Cross out completed blocks as you go',
+        ]),
+        paragraph(),
+        heading(2, '🔄 Transitions'),
+        paragraph('What to do between blocks to reset your focus:'),
+        bulletList([
+            'Stand up & stretch',
+            'Get water',
+            'Take 3 deep breaths',
+            'Review what\'s next (don\'t start yet)',
+        ]),
+        paragraph(),
+        heading(2, '🏁 End of Day'),
+        boldParagraph('Blocks completed: ', ' / 8'),
+        boldParagraph('Best block: '),
+        boldParagraph('Hardest block: '),
+        boldParagraph('Tomorrow\'s priority: '),
+    ],
+};
+
 const TEMPLATES: Record<TemplateType, JSONContent> = {
     'lecture-notes': lectureNotes,
     'lab-report': labReport,
@@ -326,6 +453,9 @@ const TEMPLATES: Record<TemplateType, JSONContent> = {
     'weekly-planner': weeklyPlanner,
     'research-paper': researchPaper,
     'daily-journal': dailyJournal,
+    'body-doubling': bodyDoubling,
+    'brain-dump': brainDump,
+    'time-boxing': timeBoxing,
 };
 
 export function getTemplate(type: TemplateType): JSONContent {
@@ -343,4 +473,7 @@ export const TEMPLATE_LIST: { type: TemplateType; label: string; icon: string }[
     { type: 'weekly-planner', label: 'Weekly Planner', icon: '📆' },
     { type: 'research-paper', label: 'Research Paper', icon: '🔍' },
     { type: 'daily-journal', label: 'Daily Journal', icon: '📓' },
+    { type: 'body-doubling', label: 'Body Doubling', icon: '🤝' },
+    { type: 'brain-dump', label: 'Brain Dump', icon: '🧠' },
+    { type: 'time-boxing', label: 'Time Boxing', icon: '⏱️' },
 ];

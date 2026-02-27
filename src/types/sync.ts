@@ -33,7 +33,7 @@ export interface FileMeta {
     properties?: Record<string, any>;
 }
 
-export type TemplateType = 'lecture-notes' | 'lab-report' | 'essay-outline' | 'meeting-notes' | 'study-guide' | 'project-plan' | 'cornell-notes' | 'weekly-planner' | 'research-paper' | 'daily-journal';
+export type TemplateType = 'lecture-notes' | 'lab-report' | 'essay-outline' | 'meeting-notes' | 'study-guide' | 'project-plan' | 'cornell-notes' | 'weekly-planner' | 'research-paper' | 'daily-journal' | 'body-doubling' | 'brain-dump' | 'time-boxing';
 
 export interface QueryConfig {
     filterSubject?: string;

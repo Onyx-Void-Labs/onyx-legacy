@@ -24,7 +24,8 @@
       "@/store/*": ["./src/store/*"],
       "@/utils/*": ["./src/utils/*"],
       "@/services/*": ["./src/services/*"],
-      "@/contexts/*": ["./src/contexts/*"]
+      "@/contexts/*": ["./src/contexts/*"],
+      "@/data/*": ["./src/data/*"]
     },
 
     /* Linting */

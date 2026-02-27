@@ -1340,7 +1340,7 @@ function CardEditorModal({
 
     return createPortal(
         <div
-            className="fixed inset-0 z-[99999] flex items-center justify-center"
+            className="fixed inset-0 z-99999 flex items-center justify-center"
             onClick={onCancel}
         >
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />

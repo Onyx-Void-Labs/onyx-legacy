@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use tauri::State;
@@ -214,4 +215,48 @@ pub async fn ensure_local_uuid(pool: State<'_, SqlitePool>, id: i64) -> Result<S
 #[tauri::command]
 pub fn move_to_trash(path: String) -> Result<(), String> {
     trash::delete(&path).map_err(|e| format!("Failed to move to trash: {}", e))
+}
+
+/* ─── Transcription (Whisper stub) ────────────────────────────────────── */
+
+#[derive(Serialize)]
+pub struct TranscriptionSegment {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+}
+
+#[derive(Serialize)]
+pub struct TranscriptionOutput {
+    pub segments: Vec<TranscriptionSegment>,
+    pub full_text: String,
+    pub duration: f64,
+    pub language: String,
+}
+
+/// Transcribe audio using a local Whisper model.
+/// Currently a stub — wire in whisper-rs when the model is downloaded.
+///
+/// `audio_base64` is the base64-encoded WebM/Opus audio data from the browser.
+///
+/// To enable real transcription:
+/// 1. Add `whisper-rs` to Cargo.toml dependencies
+/// 2. Decode the base64 audio, convert to 16kHz mono f32 PCM
+/// 3. Run whisper_rs::WhisperContext with the downloaded model
+/// 4. Return segment-level results
+#[tauri::command]
+pub async fn transcribe_audio(audio_base64: String) -> Result<TranscriptionOutput, String> {
+    // Decode the base64 audio data (validates the input)
+    let _audio_bytes = general_purpose::STANDARD
+        .decode(&audio_base64)
+        .map_err(|e| format!("Invalid audio data: {}", e))?;
+
+    // TODO: When whisper-rs is added as a dependency:
+    // 1. Convert WebM/Opus → 16kHz mono f32 PCM (via symphonia or ffmpeg)
+    // 2. Load the Whisper model from the app data directory
+    // 3. Run full transcription with timestamps
+    // 4. Return real segments
+
+    // For now, return a helpful message indicating the model needs to be set up
+    Err("Whisper model not configured. Download it from Settings → Features → Offline Transcription.".to_string())
 }

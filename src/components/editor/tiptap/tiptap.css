@@ -644,3 +644,76 @@
     10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
     20%, 40%, 60%, 80% { transform: translateX(4px); }
 }
+
+/* ─── Painter Mode — Block Paint Markers ──────────────────── */
+
+/* Block-level paint gutter markers (left border accent) */
+.tiptap [data-block-id][data-paint-type="question"] {
+    border-left: 3px solid #60a5fa;
+    padding-left: 0.75em;
+    background: rgba(96, 165, 250, 0.04);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.tiptap [data-block-id][data-paint-type="answer"] {
+    border-left: 3px solid #34d399;
+    padding-left: 0.75em;
+    background: rgba(52, 211, 153, 0.04);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.tiptap [data-block-id][data-paint-type="slide"] {
+    border-left: 3px solid #a78bfa;
+    padding-left: 0.75em;
+    background: rgba(167, 139, 250, 0.04);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.tiptap [data-block-id][data-paint-type="recall"] {
+    border-left: 3px solid #fbbf24;
+    padding-left: 0.75em;
+    background: rgba(251, 191, 36, 0.04);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.tiptap [data-block-id][data-paint-type="key_term"] {
+    border-left: 3px solid #f472b6;
+    padding-left: 0.75em;
+    background: rgba(244, 114, 182, 0.04);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+/* ─── Recall Mark — Inline Fill-in-the-Blank ──────────────── */
+
+.tiptap span[data-recall-mark] {
+    background: rgba(251, 191, 36, 0.15);
+    border-bottom: 2px solid rgba(251, 191, 36, 0.4);
+    padding: 0 2px;
+    border-radius: 2px;
+    transition: all 0.15s ease;
+}
+
+.tiptap span[data-recall-mark]:hover {
+    background: rgba(251, 191, 36, 0.25);
+}
+
+/* Recall Mode — hidden state (blanked out) */
+.tiptap span[data-recall-mark].recall-hidden {
+    background: #27272a;
+    color: transparent;
+    border-bottom-color: #52525b;
+    border-radius: 3px;
+    user-select: none;
+    cursor: pointer;
+}
+
+.tiptap span[data-recall-mark].recall-hidden:hover {
+    background: #3f3f46;
+}
+
+/* Recall Mode — revealed state */
+.tiptap span[data-recall-mark].recall-revealed {
+    background: rgba(52, 211, 153, 0.15);
+    color: #6ee7b7;
+    border-bottom-color: #34d399;
+}

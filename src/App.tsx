@@ -36,10 +36,15 @@ import EmailView from "@/components/email/EmailView";
 import PhotosView from "@/components/photos/PhotosView";
 import PasswordsView from "@/components/passwords/PasswordsView";
 import CloudView from "@/components/cloud/CloudView";
+import QuestionLibrary from "@/components/questions/QuestionLibrary";
+import CanvasView from "@/components/canvas/CanvasView";
+import { useCanvasStore } from "@/store/canvasStore";
 
 const TODAY_SENTINEL = '__today__';
 const FLASHCARD_SENTINEL = '__flashcards__';
 const TRASH_SENTINEL = '__trash__';
+const QUESTIONS_SENTINEL = '__questions__';
+const CANVAS_PREFIX = '__canvas:'; // e.g. __canvas:abc123
 const COLLECTION_PREFIX = '__collection:'; // e.g. __collection:task
 
 function AppContent() {
@@ -92,7 +97,7 @@ function AppContent() {
   useEffect(() => {
     const loadedNoteIds = new Set(files.map(n => n.id));
     const isSentinel = (id: string) =>
-      id === TODAY_SENTINEL || id === FLASHCARD_SENTINEL || id === TRASH_SENTINEL || id.startsWith(COLLECTION_PREFIX);
+      id === TODAY_SENTINEL || id === FLASHCARD_SENTINEL || id === TRASH_SENTINEL || id === QUESTIONS_SENTINEL || id.startsWith(COLLECTION_PREFIX) || id.startsWith(CANVAS_PREFIX);
     const validTabs = tabs.filter(tabId => isSentinel(tabId) || loadedNoteIds.has(tabId));
 
     if (validTabs.length !== tabs.length) {
@@ -285,6 +290,31 @@ function AppContent() {
     }
   }, [tabs]);
 
+  const handleGoToQuestions = useCallback(() => {
+    if (tabs.includes(QUESTIONS_SENTINEL)) {
+      setActiveTabId(QUESTIONS_SENTINEL);
+    } else {
+      setTabs((prev) => [...prev, QUESTIONS_SENTINEL]);
+      setActiveTabId(QUESTIONS_SENTINEL);
+    }
+  }, [tabs]);
+
+  const handleGoToCanvas = useCallback(() => {
+    // Open the active canvas or create one, then open its tab
+    const { canvases, createCanvas, activeCanvasId } = useCanvasStore.getState();
+    let cid = activeCanvasId;
+    if (!cid || !canvases.find((c) => c.id === cid)) {
+      cid = createCanvas('Untitled Canvas');
+    }
+    const tabId = `${CANVAS_PREFIX}${cid}`;
+    if (tabs.includes(tabId)) {
+      setActiveTabId(tabId);
+    } else {
+      setTabs((prev) => [...prev, tabId]);
+      setActiveTabId(tabId);
+    }
+  }, [tabs]);
+
   // ─── Open a collection view (all notes of a type) ────────────────
   const handleOpenCollection = useCallback((type: NoteType) => {
     const id = `${COLLECTION_PREFIX}${type}`;
@@ -305,6 +335,9 @@ function AppContent() {
   const isToday = activeTabId === TODAY_SENTINEL;
   const isFlashcards = activeTabId === FLASHCARD_SENTINEL;
   const isTrash = activeTabId === TRASH_SENTINEL;
+  const isQuestions = activeTabId === QUESTIONS_SENTINEL;
+  const isCanvas = activeTabId?.startsWith(CANVAS_PREFIX) ?? false;
+  const canvasId = isCanvas ? activeTabId!.slice(CANVAS_PREFIX.length) : null;
   const isCollection = activeTabId?.startsWith(COLLECTION_PREFIX) ?? false;
   const collectionType = isCollection
     ? (activeTabId!.slice(COLLECTION_PREFIX.length) as NoteType)
@@ -344,6 +377,14 @@ function AppContent() {
                 ) : isTrash ? (
                   <ErrorBoundary fallbackTitle="Trash view crashed">
                     <TrashView onOpenNote={(id) => openTab(id, true)} />
+                  </ErrorBoundary>
+                ) : isQuestions ? (
+                  <ErrorBoundary fallbackTitle="Question Library crashed">
+                    <QuestionLibrary />
+                  </ErrorBoundary>
+                ) : isCanvas && canvasId ? (
+                  <ErrorBoundary fallbackTitle="Canvas crashed">
+                    <CanvasView canvasId={canvasId} />
                   </ErrorBoundary>
                 ) : isCollection && collectionType ? (
                   <ErrorBoundary fallbackTitle="Collection view crashed">
@@ -436,6 +477,8 @@ function AppContent() {
                 onGoToFlashcards={handleGoToFlashcards}
                 onOpenCollection={handleOpenCollection}
                 onGoToTrash={handleGoToTrash}
+                onGoToQuestions={handleGoToQuestions}
+                onGoToCanvas={handleGoToCanvas}
               />
             </ErrorBoundary>
           </div>

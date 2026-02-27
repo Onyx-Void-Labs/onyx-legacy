@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useRef } from 'react';
 import {
     ArrowRight,
     CheckCircle2,
@@ -8,6 +8,13 @@ import {
     ChevronRight,
     Inbox,
     CalendarHeart,
+    Flame,
+    Target,
+    Zap,
+    Send,
+    X,
+    Check,
+    HelpCircle,
 } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
 import type { FileMeta } from '../../types/sync';
@@ -21,6 +28,43 @@ import {
     getDueThisWeek,
     getTodayJournal,
 } from '../../lib/today';
+import { useTodayStore } from '../../store/todayStore';
+import { useQuestionStore } from '../../store/questionStore';
+import { useFeature } from '../../hooks/useFeature';
+
+/* ─── Study Heatmap sub-component ─────────────────────────── */
+
+function StudyHeatmap({ data }: { data: { date: string; minutes: number; sessions: number }[] }) {
+    const getColor = (minutes: number): string => {
+        if (minutes === 0) return 'bg-zinc-800/40';
+        if (minutes < 15) return 'bg-violet-900/50';
+        if (minutes < 30) return 'bg-violet-700/60';
+        if (minutes < 60) return 'bg-violet-600/70';
+        return 'bg-violet-500/80';
+    };
+
+    // 90-day grid: 13 columns x ~7 rows
+    const weeks: typeof data[] = [];
+    for (let i = 0; i < data.length; i += 7) {
+        weeks.push(data.slice(i, i + 7));
+    }
+
+    return (
+        <div className="flex gap-0.75 px-1 overflow-hidden">
+            {weeks.map((week, wi) => (
+                <div key={wi} className="flex flex-col gap-0.75">
+                    {week.map((day) => (
+                        <div
+                            key={day.date}
+                            className={`w-2.75 h-2.75 rounded-xs ${getColor(day.minutes)} transition-colors`}
+                            title={`${day.date}: ${day.minutes} min, ${day.sessions} sessions`}
+                        />
+                    ))}
+                </div>
+            ))}
+        </div>
+    );
+}
 
 interface TodayPageProps {
     onOpenNote: (id: string) => void;
@@ -52,6 +96,29 @@ function formatRelativeDate(dateStr: string): string {
 
 export default function TodayPage({ onOpenNote }: TodayPageProps) {
     const { files, updateFile } = useSync();
+
+    /* ── Today Store ─────────────────────────────────── */
+    const {
+        logStudyMinutes,
+        getHeatmapData,
+        getTodayMinutes,
+        getStreak,
+        brainDumpItems,
+        addBrainDump,
+        removeBrainDump,
+        markBrainDumpProcessed,
+        getTodayIntention,
+        setIntention,
+    } = useTodayStore();
+
+    const questionLibraryEnabled = useFeature('question_library');
+    const getDueQuestions = useQuestionStore((s) => s.getDueQuestions);
+    const dueQuestions = useMemo(() => getDueQuestions(), [getDueQuestions]);
+
+    const [dumpText, setDumpText] = useState('');
+    const [intentionText, setIntentionText] = useState(() => getTodayIntention());
+    const [intentionSaved, setIntentionSaved] = useState(!!getTodayIntention());
+    const dumpInputRef = useRef<HTMLInputElement>(null);
 
     const dayLabel = new Date().toLocaleDateString('en-US', {
         weekday: 'long',
@@ -163,6 +230,168 @@ export default function TodayPage({ onOpenNote }: TodayPageProps) {
 
                 {/* Divider */}
                 <div className="h-px bg-zinc-800/60 my-5" />
+
+                {/* ── Daily Intention ────────────────────────────── */}
+                <div className="mb-6">
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                        <Target size={13} className="text-violet-400" />
+                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-violet-400">
+                            Today's Intention
+                        </h3>
+                    </div>
+                    {intentionSaved ? (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/5 border border-violet-500/10">
+                            <span className="text-[13px] text-zinc-300 flex-1 italic">"{intentionText}"</span>
+                            <button
+                                onClick={() => setIntentionSaved(false)}
+                                className="text-[11px] text-zinc-500 hover:text-violet-400 transition-colors cursor-pointer"
+                            >
+                                Edit
+                            </button>
+                        </div>
+                    ) : (
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                if (intentionText.trim()) {
+                                    setIntention(intentionText.trim());
+                                    setIntentionSaved(true);
+                                }
+                            }}
+                            className="flex items-center gap-2"
+                        >
+                            <input
+                                type="text"
+                                value={intentionText}
+                                onChange={(e) => setIntentionText(e.target.value)}
+                                placeholder="What's your main focus today?"
+                                className="flex-1 bg-zinc-800/40 border border-zinc-700/50 rounded-lg px-3 py-2 text-[13px] text-zinc-200 placeholder-zinc-600 outline-none focus:border-violet-500/40 transition-colors"
+                            />
+                            <button
+                                type="submit"
+                                disabled={!intentionText.trim()}
+                                className="px-3 py-2 bg-violet-600/20 text-violet-300 text-[12px] font-medium rounded-lg hover:bg-violet-600/30 disabled:opacity-40 transition-colors cursor-pointer"
+                            >
+                                Set
+                            </button>
+                        </form>
+                    )}
+                </div>
+
+                {/* ── Study Heatmap ──────────────────────────────── */}
+                <div className="mb-6">
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                        <Flame size={13} className="text-orange-400" />
+                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-orange-400">
+                            Study Activity
+                        </h3>
+                        <span className="text-[11px] text-zinc-500 font-mono ml-auto">
+                            {getStreak()} day streak · {getTodayMinutes()} min today
+                        </span>
+                    </div>
+                    <StudyHeatmap data={getHeatmapData()} />
+                </div>
+
+                {/* ── Brain Dump ─────────────────────────────────── */}
+                <div className="mb-6">
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                        <Zap size={13} className="text-amber-400" />
+                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-amber-400">
+                            Brain Dump
+                        </h3>
+                        <span className="text-[11px] text-zinc-600 font-mono ml-1">
+                            {brainDumpItems.filter((b) => !b.processed).length}
+                        </span>
+                    </div>
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            if (dumpText.trim()) {
+                                addBrainDump(dumpText.trim());
+                                setDumpText('');
+                                dumpInputRef.current?.focus();
+                            }
+                        }}
+                        className="flex items-center gap-2 mb-2"
+                    >
+                        <input
+                            ref={dumpInputRef}
+                            type="text"
+                            value={dumpText}
+                            onChange={(e) => setDumpText(e.target.value)}
+                            placeholder="Quick thought, idea, or task…"
+                            className="flex-1 bg-zinc-800/40 border border-zinc-700/50 rounded-lg px-3 py-2 text-[13px] text-zinc-200 placeholder-zinc-600 outline-none focus:border-amber-500/40 transition-colors"
+                        />
+                        <button
+                            type="submit"
+                            disabled={!dumpText.trim()}
+                            className="p-2 bg-amber-600/20 text-amber-300 rounded-lg hover:bg-amber-600/30 disabled:opacity-40 transition-colors cursor-pointer"
+                        >
+                            <Send size={14} />
+                        </button>
+                    </form>
+                    {brainDumpItems.filter((b) => !b.processed).length > 0 && (
+                        <div className="space-y-1">
+                            {brainDumpItems
+                                .filter((b) => !b.processed)
+                                .slice(0, 10)
+                                .map((item) => (
+                                    <div
+                                        key={item.id}
+                                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-zinc-800/40 transition-colors group"
+                                    >
+                                        <span className="text-[13px] text-zinc-400 flex-1 truncate">
+                                            {item.text}
+                                        </span>
+                                        <button
+                                            onClick={() => markBrainDumpProcessed(item.id)}
+                                            className="opacity-0 group-hover:opacity-100 p-0.5 text-green-400 hover:text-green-300 transition-all cursor-pointer"
+                                            title="Mark processed"
+                                        >
+                                            <Check size={12} />
+                                        </button>
+                                        <button
+                                            onClick={() => removeBrainDump(item.id)}
+                                            className="opacity-0 group-hover:opacity-100 p-0.5 text-zinc-500 hover:text-red-400 transition-all cursor-pointer"
+                                            title="Remove"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* ── Question Digest ────────────────────────────── */}
+                {questionLibraryEnabled && dueQuestions.length > 0 && (
+                    <div className="mb-6">
+                        <div className="flex items-center gap-2 mb-2 px-1">
+                            <HelpCircle size={13} className="text-sky-400" />
+                            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-sky-400">
+                                Questions Due
+                            </h3>
+                            <span className="text-[11px] text-zinc-600 font-mono ml-1">
+                                {dueQuestions.length}
+                            </span>
+                        </div>
+                        <div className="space-y-1">
+                            {dueQuestions.slice(0, 5).map((q) => (
+                                <div
+                                    key={q.id}
+                                    className="px-3 py-2 rounded-lg bg-sky-500/5 border border-sky-500/10"
+                                >
+                                    <p className="text-[13px] text-zinc-300">{q.question}</p>
+                                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                                        {q.difficulty} · streak {q.streak}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="h-px bg-zinc-800/40 my-4" />
 
                 {/* Overdue / Carried Over */}
                 {carriedOver.length > 0 && (

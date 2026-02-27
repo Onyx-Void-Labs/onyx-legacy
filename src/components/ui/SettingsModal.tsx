@@ -164,7 +164,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
@@ -172,7 +172,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
             />
 
             {/* Modal Container */}
-            <div className="relative w-full max-w-4xl h-[650px] bg-zinc-950/90 border border-zinc-800/50 rounded-2xl shadow-2xl overflow-hidden flex animate-in zoom-in-95 duration-200">
+            <div className="relative w-full max-w-4xl h-162.5 bg-zinc-950/90 border border-zinc-800/50 rounded-2xl shadow-2xl overflow-hidden flex animate-in zoom-in-95 duration-200">
                 {/* Top-Right Close Button */}
                 <button
                     onClick={() => toggleSettings(false)}
@@ -295,7 +295,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
                                                     </div>
 
                                                     <div className="flex items-center gap-6 relative z-10">
-                                                        <div className="w-20 h-20 bg-gradient-to-tr from-purple-600 to-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500">
+                                                        <div className="w-20 h-20 bg-linear-to-tr from-purple-600 to-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500">
                                                             <User size={40} />
                                                         </div>
                                                         <div className="flex-1">
@@ -337,7 +337,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
                                                             <span className="text-zinc-300">12% used</span>
                                                         </div>
                                                         <div className="w-full h-2 bg-zinc-950 rounded-full border border-white/5 overflow-hidden">
-                                                            <div className="h-full bg-gradient-to-r from-purple-600 to-emerald-500 w-[12.2%]" />
+                                                            <div className="h-full bg-linear-to-r from-purple-600 to-emerald-500 w-[12.2%]" />
                                                         </div>
                                                     </div>
                                                     <div className="grid grid-cols-2 gap-4">
@@ -425,7 +425,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
                                 {/* ABOUT SECTION */}
                                 {activeTab === 'about' && (
                                     <div className="space-y-10 text-center py-10 animate-in fade-in duration-1000">
-                                        <div className="w-24 h-24 bg-gradient-to-tr from-purple-600 to-indigo-600 rounded-[2.5rem] mx-auto flex items-center justify-center shadow-2xl shadow-purple-500/20 mb-6 group cursor-pointer hover:rotate-12 transition-transform duration-500">
+                                        <div className="w-24 h-24 bg-linear-to-tr from-purple-600 to-indigo-600 rounded-[2.5rem] mx-auto flex items-center justify-center shadow-2xl shadow-purple-500/20 mb-6 group cursor-pointer hover:rotate-12 transition-transform duration-500">
                                             <Settings size={48} className="text-white" />
                                         </div>
                                         <div className="space-y-2">
@@ -456,13 +456,13 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
                                             <div className="grid grid-cols-2 gap-8">
                                                 <div className="space-y-4">
                                                     <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest pl-1">Menu & Buttons Preview</div>
-                                                    <div className="p-8 bg-zinc-900/60 border border-zinc-800 rounded-[2rem] min-h-[120px] flex items-center justify-center text-center shadow-inner" style={{ fontFamily: settings.uiFontFamily }}>
+                                                    <div className="p-8 bg-zinc-900/60 border border-zinc-800 rounded-4xl min-h-30 flex items-center justify-center text-center shadow-inner" style={{ fontFamily: settings.uiFontFamily }}>
                                                         <p className="text-sm text-zinc-200 leading-relaxed italic">"The interface should be felt, but the type must be heard."</p>
                                                     </div>
                                                 </div>
                                                 <div className="space-y-4">
                                                     <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest pl-1">Writing Area Preview</div>
-                                                    <div className="p-8 bg-zinc-900/60 border border-zinc-800 rounded-[2rem] min-h-[120px] flex items-center justify-center text-center shadow-inner" style={{ fontFamily: settings.editorFontFamily }}>
+                                                    <div className="p-8 bg-zinc-900/60 border border-zinc-800 rounded-4xl min-h-30 flex items-center justify-center text-center shadow-inner" style={{ fontFamily: settings.editorFontFamily }}>
                                                         <p className="text-xs text-zinc-300">class Onyx {'{'} static experience = 'limitless'; {'}'}</p>
                                                     </div>
                                                 </div>
@@ -678,7 +678,7 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
                                                     <span className="text-sm font-bold text-zinc-400 group-hover:text-purple-400">{s.label}</span>
                                                     <div className="flex gap-1.5 p-1 bg-black/40 rounded-lg">
                                                         {s.key.split(' ').map((key, ki) => (
-                                                            <span key={ki} className="px-2 py-1 min-w-[32px] text-center border border-white/5 bg-zinc-800/50 text-[10px] font-black text-zinc-200 rounded shadow-2xl">{key}</span>
+                                                            <span key={ki} className="px-2 py-1 min-w-8 text-center border border-white/5 bg-zinc-800/50 text-[10px] font-black text-zinc-200 rounded shadow-2xl">{key}</span>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -807,7 +807,7 @@ function HelpTooltip({ text }: { text: string }) {
                 <Info size={8} className="text-zinc-600 group-hover:text-purple-400" />
             </div>
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-200 pointer-events-none scale-90 group-hover:scale-100">
-                <div className="absolute bottom-[-4px] left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-900 border-r border-b border-zinc-800 rotate-45" />
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-900 border-r border-b border-zinc-800 rotate-45" />
                 <p className="text-[10px] text-zinc-300 leading-relaxed italic">{text}</p>
             </div>
         </div>

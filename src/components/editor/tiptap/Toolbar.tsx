@@ -10,7 +10,11 @@ import {
     Undo2, Redo2,
     Type, Table, Image, Youtube, Sigma, MessageSquareWarning, Code2,
     Eye, Hash, PanelLeftClose, ChevronDown,
+    Paintbrush, Mic,
 } from 'lucide-react';
+
+import { usePainterStore } from '@/store/painterStore';
+import { useFeature } from '@/hooks/useFeature';
 
 type RibbonTab = 'format' | 'insert' | 'view';
 
@@ -543,6 +547,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({ editor }) => {
     const colorBtnRef = useRef<HTMLButtonElement>(null);
     const highlightBtnRef = useRef<HTMLButtonElement>(null);
 
+    // Painter mode
+    const painterEnabled = useFeature('painter');
+    const painterActive = usePainterStore((s) => s.isActive);
+    const enterPainterMode = usePainterStore((s) => s.enterPainterMode);
+    const transcriptionEnabled = useFeature('transcription');
+
     useEffect(() => {
         if (!editor) return;
         const forceUpdate = () => setTick((t) => t + 1);
@@ -898,6 +908,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({ editor }) => {
 
     const renderViewTab = () => (
         <div className="flex items-center gap-2 py-0.5">
+            {/* Painter Mode toggle — gated by feature flag */}
+            {painterEnabled && (
+                <ViewToggle
+                    onClick={() => {
+                        if (!painterActive) enterPainterMode();
+                    }}
+                    icon={<Paintbrush size={14} />}
+                    label="Painter"
+                    isActive={painterActive}
+                />
+            )}
             <ViewToggle
                 onClick={() => window.dispatchEvent(new CustomEvent('onyx:toggle-focus-mode'))}
                 icon={<Eye size={14} />}
@@ -913,6 +934,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({ editor }) => {
                 icon={<PanelLeftClose size={14} />}
                 label="Properties"
             />
+            {/* Transcription toggle — gated by feature flag */}
+            {transcriptionEnabled && (
+                <ViewToggle
+                    onClick={() => window.dispatchEvent(new CustomEvent('onyx:toggle-transcription'))}
+                    icon={<Mic size={14} />}
+                    label="Transcribe"
+                />
+            )}
         </div>
     );
 

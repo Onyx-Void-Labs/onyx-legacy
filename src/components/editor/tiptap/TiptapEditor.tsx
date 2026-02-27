@@ -43,6 +43,22 @@ import { SearchReplace } from './extensions/SearchReplace';
 import { NoteLink } from './extensions/NoteLink';
 import { QueryBlock } from './extensions/QueryBlock';
 import { FontSize } from './extensions/FontSize';
+import { BlockId } from './extensions/BlockId';
+import { RecallMark } from './extensions/RecallMark';
+import { SmartMathExtension } from './extensions/SmartMathExtension';
+
+// Painter
+import PainterPalette from './PainterPalette';
+import SmartMathPopup from './SmartMathPopup';
+import SlidesView from '../SlidesView';
+import RecallBar from '../RecallBar';
+import TeachBackView from '../TeachBackView';
+import SessionBar from '../SessionBar';
+import TranscriptionPanel from '../TranscriptionPanel';
+import { usePainterStore } from '@/store/painterStore';
+import { useFeature } from '@/hooks/useFeature';
+import { extractKeyTerms } from '@/lib/painter/autoPaint';
+import type { PaintAnnotation } from '@/lib/painter/paintTypes';
 
 // UI Components
 import { Toolbar } from './Toolbar';
@@ -574,6 +590,10 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                 DragHandle,
                 SlashCommands,
                 SearchReplace,
+                // Phase 9 extensions
+                BlockId,
+                RecallMark,
+                SmartMathExtension,
             ],
             editorProps: {
                 attributes: {
@@ -586,6 +606,38 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
         },
         [activeNoteId, yDoc, ready]
     );
+
+    // Painter mode state
+    const painterActive = usePainterStore((s) => s.isActive);
+    const painterEnabled = useFeature('painter');
+    const transcriptionEnabled = useFeature('transcription');
+    const [showTranscription, setShowTranscription] = useState(false);
+
+    // Listen for transcription toggle event from Toolbar
+    useEffect(() => {
+        const handler = () => setShowTranscription((v) => !v);
+        window.addEventListener('onyx:toggle-transcription', handler);
+        return () => window.removeEventListener('onyx:toggle-transcription', handler);
+    }, []);
+
+    // Painter: auto-paint callback
+    const handleAutoPaint = useCallback(() => {
+        if (!editor || !yDocRef.current) return;
+        const text = editor.getText();
+        const terms = extractKeyTerms(text);
+        if (terms.length === 0) return;
+
+        const paintMap = yDocRef.current.getMap<PaintAnnotation>('paint_annotations');
+        const activePaintType = usePainterStore.getState().activePaintType;
+
+        terms.forEach((term) => {
+            const id = `auto-${term.text.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+            paintMap.set(id, {
+                type: activePaintType,
+                groupId: id,
+            });
+        });
+    }, [editor]);
 
     // All hooks must be called before any conditional return
     const handleTitleChange = useCallback(
@@ -795,6 +847,14 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             {/* Toolbar */}
             <Toolbar editor={editor} />
 
+            {/* Session Timer Bar — below toolbar */}
+            <SessionBar />
+
+            {/* Painter Palette — floating overlay when painter mode active */}
+            {painterEnabled && painterActive && (
+                <PainterPalette onAutoPaint={handleAutoPaint} />
+            )}
+
             {/* Find/Replace Widget */}
             {showFind && (
                 <TiptapFindWidget
@@ -901,6 +961,9 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                     {/* Slash Command Menu */}
                     <SlashMenu editor={editor} />
 
+                    {/* Smart Math Popup — backslash autocomplete inside math blocks */}
+                    <SmartMathPopup editor={editor} />
+
                     {/* Note Link Suggestion Menu */}
                     <NoteLinkSuggestion editor={editor} />
                 </div>
@@ -953,6 +1016,29 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                     editor={editor}
                     onClose={() => setTableCtx(null)}
                 />
+            )}
+
+            {/* Slides presentation overlay */}
+            <SlidesView />
+
+            {/* Recall Mode bar */}
+            <RecallBar />
+
+            {/* Teach-Back Mode overlay */}
+            <TeachBackView />
+
+            {/* Transcription Side Panel */}
+            {transcriptionEnabled && showTranscription && (
+                <div className="absolute right-0 top-0 bottom-0 w-80 z-30 border-l border-zinc-800/60 bg-(--onyx-bg)">
+                    <TranscriptionPanel
+                        onInsertText={(text) => {
+                            if (editor) {
+                                editor.chain().focus().insertContent(text).run();
+                                setShowTranscription(false);
+                            }
+                        }}
+                    />
+                </div>
             )}
         </div>
     );

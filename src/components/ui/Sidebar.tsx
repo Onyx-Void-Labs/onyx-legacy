@@ -1,10 +1,11 @@
 
-import { Search, Plus, Trash2, Lock, ChevronRight, CalendarHeart, BookOpen, Pin, PinOff, Archive, ArchiveRestore } from "lucide-react";
+import { Search, Plus, Trash2, Lock, ChevronRight, CalendarHeart, BookOpen, Pin, PinOff, Archive, ArchiveRestore, HelpCircle, LayoutDashboard } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import LockModal from "./LockModal";
 import { useSync } from "../../contexts/SyncContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { NoteTypeIcon, TYPE_EMOJI } from "../../lib/noteIcons";
+import { useFeature } from "@/hooks/useFeature";
 import type { FileMeta, NoteType } from "../../types/sync";
 
 type Note = {
@@ -57,6 +58,8 @@ interface SidebarProps {
     onGoToFlashcards?: () => void; // Navigate to flashcard view
     onOpenCollection?: (type: NoteType) => void; // Open collection page query view
     onGoToTrash?: () => void; // Navigate to trash view
+    onGoToQuestions?: () => void; // Navigate to Question Library
+    onGoToCanvas?: () => void;    // Navigate to canvas view
 }
 
 export default function Sidebar({
@@ -73,6 +76,8 @@ export default function Sidebar({
     onGoToFlashcards,
     onOpenCollection,
     onGoToTrash,
+    onGoToQuestions,
+    onGoToCanvas,
 }: SidebarProps) {
 
     const [lockingNoteId, setLockingNoteId] = useState<string | null>(null);
@@ -240,6 +245,28 @@ export default function Sidebar({
                     <BookOpen size={14} />
                     <span className="text-[13px] font-medium">Flashcards</span>
                 </button>
+
+                {/* Questions button — gated by feature flag */}
+                {onGoToQuestions && (
+                    <button
+                        onClick={onGoToQuestions}
+                        className={quickActionBase}
+                    >
+                        <HelpCircle size={14} />
+                        <span className="text-[13px] font-medium">Questions</span>
+                    </button>
+                )}
+
+                {/* Canvas button — gated by feature flag */}
+                {onGoToCanvas && (
+                    <button
+                        onClick={onGoToCanvas}
+                        className={quickActionBase}
+                    >
+                        <LayoutDashboard size={14} />
+                        <span className="text-[13px] font-medium">Canvas</span>
+                    </button>
+                )}
 
                 {/* New Page — primary CTA with more pronounced hover */}
                 <button
