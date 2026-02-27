@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { RotateCcw, Trash2, CheckSquare, Square, AlertTriangle } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
-import type { FileMeta } from '../../types/sync';
 import { NoteTypeIcon } from '../../lib/noteIcons';
 
 interface TrashViewProps {

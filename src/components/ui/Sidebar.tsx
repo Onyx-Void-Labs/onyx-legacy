@@ -4,17 +4,13 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import LockModal from "./LockModal";
 import { useSync } from "../../contexts/SyncContext";
 import { useSettings } from "../../contexts/SettingsContext";
-import { NoteTypeIcon, TYPE_EMOJI } from "../../lib/noteIcons";
-import { useFeature } from "@/hooks/useFeature";
-import type { FileMeta, NoteType } from "../../types/sync";
+import { NoteTypeIcon } from "../../lib/noteIcons";
+import type { NoteType } from "../../types/sync";
 
 type Note = {
     id: string;
     title: string;
 };
-
-// ─── Note type → emoji icon mapping (legacy, used for string contexts) ───
-const TYPE_ICON = TYPE_EMOJI;
 
 const TYPE_LABEL: Record<NoteType, string> = {
     note: 'Notes',
