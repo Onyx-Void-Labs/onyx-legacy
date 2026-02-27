@@ -94,7 +94,7 @@ function formatRelativeDate(dateStr: string): string {
     return dateStr;
 }
 
-export default function TodayPage({ onOpenNote }: TodayPageProps) {
+export default function TodayPage({ onOpenNote: _onOpenNote }: TodayPageProps) {
     const { files, updateFile } = useSync();
 
     /* ── Today Store ─────────────────────────────────── */
@@ -142,7 +142,7 @@ export default function TodayPage({ onOpenNote }: TodayPageProps) {
         const badge = PRIORITY_BADGE[task.priority ?? 'low'];
         return (
             <button
-                onClick={() => onOpenNote(task.id)}
+                onClick={() => _onOpenNote(task.id)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-violet-500/5 transition-colors duration-150 text-left group cursor-pointer"
             >
                 <button
@@ -478,7 +478,7 @@ export default function TodayPage({ onOpenNote }: TodayPageProps) {
                         {recentNotes.map((n) => (
                             <button
                                 key={n.id}
-                                onClick={() => onOpenNote(n.id)}
+                                onClick={() => _onOpenNote(n.id)}
                                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-violet-500/5 transition-colors duration-150 text-left group cursor-pointer"
                             >
                                 <span className="text-[13px]"><NoteTypeIcon type={n.type} size={13} /></span>

@@ -32,11 +32,10 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 dotenv = "0.15"
-reqwest = { version = "0.13.2", features = ["json"] }
+reqwest = { version = "0.13.2", features = ["json", "multipart", "form"] }
 tauri-plugin-oauth = "2.0.0"
 tauri-plugin-updater = "2"
 base64 = "0.22"
 hostname = "0.4"
-native-tls = "0.2"
-imap = "3"
+imap = { version = "3.0.0-alpha.15" }
 

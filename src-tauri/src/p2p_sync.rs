@@ -14,9 +14,8 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::{Read, Write};
-use tauri::{command, AppHandle, Manager};
+use tauri::command;
 use tokio::sync::broadcast;
-use base64::{Engine as _, engine::general_purpose};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

@@ -21,9 +21,9 @@ export const FontSize = Extension.create({
                 attributes: {
                     fontSize: {
                         default: null,
-                        parseHTML: (element) =>
+                        parseHTML: (element: HTMLElement) =>
                             element.style.fontSize?.replace('px', '') || null,
-                        renderHTML: (attributes) => {
+                        renderHTML: (attributes: Record<string, unknown>) => {
                             if (!attributes.fontSize) return {};
                             return { style: `font-size: ${attributes.fontSize}px` };
                         },
@@ -37,12 +37,12 @@ export const FontSize = Extension.create({
         return {
             setFontSize:
                 (size: string) =>
-                ({ chain }) => {
+                ({ chain }: { chain: () => any }) => {
                     return chain().setMark('textStyle', { fontSize: size }).run();
                 },
             unsetFontSize:
                 () =>
-                ({ chain }) => {
+                ({ chain }: { chain: () => any }) => {
                     return chain()
                         .setMark('textStyle', { fontSize: null })
                         .removeEmptyTextStyle()
@@ -50,7 +50,7 @@ export const FontSize = Extension.create({
                 },
             increaseFontSize:
                 (step = 1) =>
-                ({ chain, editor }) => {
+                ({ chain, editor }: { chain: () => any; editor: any }) => {
                     const current =
                         editor.getAttributes('textStyle')?.fontSize || '16';
                     const newSize = Math.min(
@@ -63,7 +63,7 @@ export const FontSize = Extension.create({
                 },
             decreaseFontSize:
                 (step = 1) =>
-                ({ chain, editor }) => {
+                ({ chain, editor }: { chain: () => any; editor: any }) => {
                     const current =
                         editor.getAttributes('textStyle')?.fontSize || '16';
                     const newSize = Math.max(

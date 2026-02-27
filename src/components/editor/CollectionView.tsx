@@ -33,7 +33,7 @@ interface CollectionViewProps {
     onNewNote: (type: NoteType) => void;
 }
 
-export default function CollectionView({ type, onOpenNote, onNewNote }: CollectionViewProps) {
+export default function CollectionView({ type, onOpenNote: _onOpenNote, onNewNote }: CollectionViewProps) {
     const { files } = useSync();
     const [search, setSearch] = useState('');
     const [sortField, setSortField] = useState<SortField>('updatedAt');
@@ -146,13 +146,13 @@ export default function CollectionView({ type, onOpenNote, onNewNote }: Collecti
                         {search ? 'No matching notes found.' : `No ${TYPE_LABEL[type].toLowerCase()} yet.`}
                     </div>
                 ) : viewMode === 'list' ? (
-                    <ListView notes={filtered} type={type} onOpenNote={onOpenNote} sortField={sortField} toggleSort={toggleSort} formatDate={formatDate} />
+                    <ListView notes={filtered} type={type} onOpenNote={_onOpenNote} sortField={sortField} toggleSort={toggleSort} formatDate={formatDate} />
                 ) : viewMode === 'grid' ? (
-                    <GridView notes={filtered} type={type} onOpenNote={onOpenNote} formatDate={formatDate} />
+                    <GridView notes={filtered} type={type} onOpenNote={_onOpenNote} formatDate={formatDate} />
                 ) : viewMode === 'board' ? (
-                    <BoardView notes={filtered} type={type} onOpenNote={onOpenNote} />
+                    <BoardView notes={filtered} type={type} onOpenNote={_onOpenNote} />
                 ) : (
-                    <CalendarView notes={filtered} type={type} onOpenNote={onOpenNote} />
+                    <CalendarView notes={filtered} type={type} onOpenNote={_onOpenNote} />
                 )}
             </div>
         </div>

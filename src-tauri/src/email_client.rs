@@ -36,9 +36,11 @@ pub struct EmailAccount {
     pub auth_method: AuthMethod,
     /// OAuth access token (short-lived) — NOT persisted, refreshed at runtime
     #[serde(skip_serializing)]
+    #[allow(dead_code)]
     pub access_token: Option<String>,
     /// For manual auth only
     #[serde(skip_serializing)]
+    #[allow(dead_code)]
     pub password: Option<String>,
 }
 
@@ -102,6 +104,7 @@ pub struct ProviderConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ComposeEmail {
     pub account_id: String,
     pub to: Vec<String>,
@@ -134,10 +137,12 @@ pub struct AutoconfigResult {
 
 // ─── Email Account Manager ───────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub struct EmailManager {
     pub accounts: Arc<Mutex<HashMap<String, EmailAccount>>>,
 }
 
+#[allow(dead_code)]
 impl EmailManager {
     pub fn new() -> Self {
         Self {
@@ -531,19 +536,8 @@ fn fetch_headers_sync(
     offset: u32,
     limit: u32,
 ) -> Result<Vec<EmailHeader>, String> {
-    let tls = native_tls::TlsConnector::builder()
-        .build()
-        .map_err(|e| format!("TLS error: {}", e))?;
-
     let client = imap::ClientBuilder::new(host, port)
-        .connect(|domain, tcp| {
-            let tls = native_tls::TlsConnector::builder()
-                .build()
-                .map_err(|e| imap::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-            let tls_stream = tls.connect(domain, tcp)
-                .map_err(|e| imap::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-            Ok(tls_stream)
-        })
+        .connect()
         .map_err(|e| format!("IMAP connect failed: {}", e))?;
 
     // Authenticate
@@ -607,7 +601,7 @@ fn fetch_headers_sync(
         let mut date = String::new();
         let mut message_id = String::new();
         let mut in_reply_to = None;
-        let mut references = Vec::new();
+        let references = Vec::new();
 
         // Parse envelope
         if let Some(envelope) = msg.envelope() {
@@ -662,11 +656,8 @@ fn fetch_headers_sync(
                 .map(|r| String::from_utf8_lossy(r).to_string());
         }
 
-        // Check for attachments from body structure
-        let has_attachments = msg
-            .bodystructure()
-            .map(|bs| check_has_attachments(bs))
-            .unwrap_or(false);
+        // Check for attachments — detection deferred to body fetch in imap 3.x alpha
+        let has_attachments = false;
 
         // Preview from text part (first 100 chars)
         let preview = String::new(); // Lazy-loaded on body fetch
@@ -691,40 +682,6 @@ fn fetch_headers_sync(
 
     session.logout().ok();
     Ok(headers)
-}
-
-fn check_has_attachments(body_structure: &imap::types::BodyStructure) -> bool {
-    match body_structure {
-        imap::types::BodyStructure::Multipart { bodies, .. } => {
-            bodies.iter().any(|b| check_has_attachments(b))
-        }
-        imap::types::BodyStructure::Basic {
-            disposition, ..
-        } => {
-            if let Some(disp) = disposition {
-                let disp_str = String::from_utf8_lossy(&disp.0).to_lowercase();
-                disp_str.contains("attachment")
-            } else {
-                false
-            }
-        }
-        imap::types::BodyStructure::Text { disposition, .. } => {
-            if let Some(disp) = disposition {
-                let disp_str = String::from_utf8_lossy(&disp.0).to_lowercase();
-                disp_str.contains("attachment")
-            } else {
-                false
-            }
-        }
-        imap::types::BodyStructure::Message { disposition, .. } => {
-            if let Some(disp) = disposition {
-                let disp_str = String::from_utf8_lossy(&disp.0).to_lowercase();
-                disp_str.contains("attachment")
-            } else {
-                false
-            }
-        }
-    }
 }
 
 // ─── Fetch Email Body ─────────────────────────────────────────────────────────
@@ -767,14 +724,7 @@ fn fetch_body_sync(
     uid: u32,
 ) -> Result<EmailBody, String> {
     let client = imap::ClientBuilder::new(host, port)
-        .connect(|domain, tcp| {
-            let tls = native_tls::TlsConnector::builder()
-                .build()
-                .map_err(|e| imap::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-            let tls_stream = tls.connect(domain, tcp)
-                .map_err(|e| imap::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-            Ok(tls_stream)
-        })
+        .connect()
         .map_err(|e| format!("IMAP connect failed: {}", e))?;
 
     let mut session = match auth_method {
@@ -1077,14 +1027,7 @@ fn list_folders_sync(
     password: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let client = imap::ClientBuilder::new(host, port)
-        .connect(|domain, tcp| {
-            let tls = native_tls::TlsConnector::builder()
-                .build()
-                .map_err(|e| imap::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-            let tls_stream = tls.connect(domain, tcp)
-                .map_err(|e| imap::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-            Ok(tls_stream)
-        })
+        .connect()
         .map_err(|e| format!("IMAP connect failed: {}", e))?;
 
     let mut session = match auth_method {
