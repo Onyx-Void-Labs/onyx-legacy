@@ -12,12 +12,6 @@ import {
   Layers,
   GraduationCap,
   MoreHorizontal,
-  CalendarDays,
-  Mail,
-  KeyRound,
-  Image,
-  Cloud,
-  Settings,
   HelpCircle,
   Brain,
   Timer,
@@ -27,7 +21,7 @@ import {
 
 export type MobileTab = 'notes' | 'today' | 'flashcards' | 'study' | 'more';
 export type StudySubTab = 'questions' | 'recall' | 'sessions';
-export type MoreSubTab = 'calendar' | 'email' | 'passwords' | 'photos' | 'cloud' | 'settings';
+export type MoreSubTab = 'calendar' | 'email' | 'passwords' | 'photos' | 'cloud' | 'settings' | 'messages';
 
 interface BottomTabBarProps {
   activeTab: MobileTab;
@@ -60,26 +54,18 @@ const STUDY_OPTIONS: { id: StudySubTab; label: string; icon: React.ComponentType
   { id: 'sessions', label: 'Sessions', icon: Timer },
 ];
 
-const MORE_OPTIONS: { id: MoreSubTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
-  { id: 'calendar', label: 'Calendar', icon: CalendarDays },
-  { id: 'email', label: 'Email', icon: Mail },
-  { id: 'passwords', label: 'Vault', icon: KeyRound },
-  { id: 'photos', label: 'Photos', icon: Image },
-  { id: 'cloud', label: 'Cloud', icon: Cloud },
-  { id: 'settings', label: 'Settings', icon: Settings },
-];
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function BottomTabBar({ activeTab, onTabChange, onStudySelect, onMoreSelect }: BottomTabBarProps) {
+export default function BottomTabBar({ activeTab, onTabChange, onStudySelect, onMoreSelect: _onMoreSelect }: BottomTabBarProps) {
   const [popoverTab, setPopoverTab] = useState<'study' | 'more' | null>(null);
 
   const handleTabPress = (tab: MobileTab) => {
-    if (tab === 'study' || tab === 'more') {
-      // Toggle popover
-      setPopoverTab(prev => (prev === tab ? null : tab));
+    if (tab === 'study') {
+      // Toggle popover for study only
+      setPopoverTab(prev => (prev === 'study' ? null : 'study'));
       onTabChange(tab);
     } else {
+      // More tab navigates directly, no popover
       setPopoverTab(null);
       onTabChange(tab);
     }
@@ -88,11 +74,6 @@ export default function BottomTabBar({ activeTab, onTabChange, onStudySelect, on
   const handleStudySelect = (sub: StudySubTab) => {
     setPopoverTab(null);
     onStudySelect?.(sub);
-  };
-
-  const handleMoreSelect = (sub: MoreSubTab) => {
-    setPopoverTab(null);
-    onMoreSelect?.(sub);
   };
 
   return (
@@ -113,14 +94,6 @@ export default function BottomTabBar({ activeTab, onTabChange, onStudySelect, on
           position="right"
         />
       )}
-      {popoverTab === 'more' && (
-        <PopoverMenu
-          items={MORE_OPTIONS}
-          onSelect={(id) => handleMoreSelect(id as MoreSubTab)}
-          position="right"
-        />
-      )}
-
       {/* Tab bar */}
       <nav
         className="shrink-0 bg-zinc-950/95 backdrop-blur-lg border-t border-zinc-800/50 z-50"

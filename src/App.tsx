@@ -71,6 +71,9 @@ function AppContent() {
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(() => shouldShowOnboarding());
 
+  // Mobile: track which note is open in the editor (separate from desktop tabs)
+  const [mobileSelectedNoteId, setMobileSelectedNoteId] = useState<string | null>(null);
+
   useEffect(() => {
     const unsubscribe = pb.authStore.onChange((_token, model) => {
       setUser(model);
@@ -284,11 +287,15 @@ function AppContent() {
       try {
         const newId = createFile('Untitled', type);
         openTab(newId, true);
+        // On mobile, also select the new note for the editor
+        if (isMobile) {
+          setMobileSelectedNoteId(newId);
+        }
       } catch (err) {
         console.error('Failed to create note:', err);
       }
     },
-    [createFile]
+    [createFile, isMobile]
   );
 
   // ─── Go to Today Page ────────────────────────────────────────────
@@ -373,6 +380,12 @@ function AppContent() {
     : null;
   const isTask = activeNoteMeta?.type === 'task';
   const isTopic = activeNoteMeta?.type === 'topic';
+
+  // ─── Mobile: selected note metadata ─────────────────────────────
+  const mobileNoteMeta: FileMeta | undefined = useMemo(
+    () => (mobileSelectedNoteId ? files.find((f) => f.id === mobileSelectedNoteId) : undefined),
+    [mobileSelectedNoteId, files]
+  );
 
   // ─── Determine sidebar visibility per module ────────────────────
   const showNoteSidebar = activeWorkspace === 'notes';
@@ -486,8 +499,11 @@ function AppContent() {
           notesListScreen={
             <ErrorBoundary fallbackTitle="Notes list crashed">
               <Sidebar
-                onSelectNote={(id) => openTab(id, true)}
-                activeNoteId={activeTabId}
+                onSelectNote={(id) => {
+                  openTab(id, true);
+                  setMobileSelectedNoteId(id);
+                }}
+                activeNoteId={mobileSelectedNoteId}
                 notes={files}
                 openTabs={tabs}
                 onDeleteNote={handleDeleteNote}
@@ -504,6 +520,19 @@ function AppContent() {
               />
             </ErrorBoundary>
           }
+          editorScreen={
+            mobileSelectedNoteId ? (
+              <ErrorBoundary fallbackTitle="Editor crashed">
+                <Editor
+                  activeNoteId={mobileSelectedNoteId}
+                  meta={mobileNoteMeta}
+                  onOpenProperties={() => setPropertiesPanelOpen(true)}
+                />
+              </ErrorBoundary>
+            ) : null
+          }
+          hasSelectedNote={!!mobileSelectedNoteId}
+          onBackFromEditor={() => setMobileSelectedNoteId(null)}
           todayScreen={
             <ErrorBoundary fallbackTitle="Today page crashed">
               <TodayPage onOpenNote={(id) => openTab(id, true)} />
@@ -542,6 +571,11 @@ function AppContent() {
           cloudScreen={
             <ErrorBoundary fallbackTitle="Cloud crashed">
               <CloudView />
+            </ErrorBoundary>
+          }
+          messagesScreen={
+            <ErrorBoundary fallbackTitle="Messages crashed">
+              <MessagesView sidebarCollapsed />
             </ErrorBoundary>
           }
           onOpenSearch={() => setSearchOpen(true)}

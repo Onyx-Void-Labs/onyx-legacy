@@ -136,16 +136,18 @@ jobs:
       - name: Initialize Tauri Android
         run: npx tauri android init
 
-      - name: Build Android APK (debug)
-        run: npx tauri android build --debug
+      - name: Build Android APK (release)
+        run: npx tauri android build
         env:
           VITE_PLATFORM: android
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: onyx-android-debug
-          path: src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
+          name: onyx-android-release
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
           retention-days: 7
 
   release:

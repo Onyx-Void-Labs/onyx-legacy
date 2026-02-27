@@ -507,8 +507,8 @@ export default function Sidebar({
                     );
                 })()}
 
-                {/* Settings */}
-                {!import.meta.env.VITE_DEMO_MODE && (
+                {/* Settings — hidden on mobile (accessible from More page) */}
+                {!isMobile && !import.meta.env.VITE_DEMO_MODE && (
                     <button
                         onClick={onOpenAuth}
                         onMouseEnter={() => setSettingsHover(true)}

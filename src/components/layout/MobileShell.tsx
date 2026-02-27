@@ -21,6 +21,7 @@ import {
   KeyRound,
   Image,
   Cloud,
+  MessageCircle,
 } from 'lucide-react';
 import BottomTabBar, { type MobileTab, type StudySubTab, type MoreSubTab } from './BottomTabBar';
 import type { StackScreen } from './StackNavigator';
@@ -30,6 +31,8 @@ import type { StackScreen } from './StackNavigator';
 interface MobileShellProps {
   /** Notes list screen (shown in Notes tab) */
   notesListScreen: ReactNode;
+  /** Editor screen to render when a note is selected */
+  editorScreen: ReactNode | null;
   /** Today page screen */
   todayScreen: ReactNode;
   /** Flashcards screen */
@@ -46,12 +49,18 @@ interface MobileShellProps {
   photosScreen: ReactNode;
   /** Cloud screen */
   cloudScreen: ReactNode;
+  /** Messages screen */
+  messagesScreen: ReactNode;
   /** Called when search is requested */
   onOpenSearch: () => void;
   /** Called to create a new note */
   onNewNote: () => void;
   /** Called to open settings */
   onOpenSettings: () => void;
+  /** Whether a note is currently selected for editing */
+  hasSelectedNote: boolean;
+  /** Called to go back from editor to notes list */
+  onBackFromEditor: () => void;
   /** 
    * Push a screen onto the current tab's stack.
    * Used by notes list to push editor, etc. 
@@ -73,8 +82,8 @@ interface MobileAppBarProps {
 function MobileAppBar({ title, showBack, onBack, onSearch, onMore, rightActions }: MobileAppBarProps) {
   return (
     <header
-      className="h-12 bg-zinc-950/95 backdrop-blur-lg flex items-center justify-between px-2 shrink-0 border-b border-zinc-800/40 z-40"
-      style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      className="bg-zinc-950/95 backdrop-blur-lg flex items-center justify-between px-2 shrink-0 border-b border-zinc-800/40 z-40"
+      style={{ paddingTop: 'env(safe-area-inset-top, 0px)', minHeight: 'calc(48px + env(safe-area-inset-top, 0px))' }}
     >
       <div className="flex items-center gap-1 min-w-0 flex-1">
         {showBack && (
@@ -146,6 +155,7 @@ const TAB_TITLES: Record<MobileTab, string> = {
 
 export default function MobileShell({
   notesListScreen,
+  editorScreen,
   todayScreen,
   flashcardsScreen,
   questionsScreen,
@@ -154,16 +164,23 @@ export default function MobileShell({
   passwordsScreen,
   photosScreen,
   cloudScreen,
+  messagesScreen,
   onOpenSearch,
   onNewNote,
   onOpenSettings,
+  hasSelectedNote,
+  onBackFromEditor,
 }: MobileShellProps) {
-  const [activeTab, setActiveTab] = useState<MobileTab>('notes');
+  const [activeTab, setActiveTab] = useState<MobileTab>('today');
   const [activeMoreScreen, setActiveMoreScreen] = useState<MoreSubTab | null>(null);
   const [activeStudyScreen, setActiveStudyScreen] = useState<StudySubTab | null>(null);
 
+  // Whether the editor is showing (notes tab + note selected)
+  const showingEditor = activeTab === 'notes' && hasSelectedNote;
+
   // Get the title for the app bar
   const appBarTitle = useMemo(() => {
+    if (showingEditor) return 'Editor';
     if (activeTab === 'more' && activeMoreScreen) {
       const labels: Record<MoreSubTab, string> = {
         calendar: 'Calendar',
@@ -172,6 +189,7 @@ export default function MobileShell({
         photos: 'Photos',
         cloud: 'Cloud',
         settings: 'Settings',
+        messages: 'Messages',
       };
       return labels[activeMoreScreen];
     }
@@ -184,13 +202,28 @@ export default function MobileShell({
       return labels[activeStudyScreen];
     }
     return TAB_TITLES[activeTab];
-  }, [activeTab, activeMoreScreen, activeStudyScreen]);
+  }, [activeTab, activeMoreScreen, activeStudyScreen, showingEditor]);
+
+  // Whether to show back button
+  const showBack = showingEditor || (activeTab === 'more' && activeMoreScreen !== null);
+
+  const handleBack = useCallback(() => {
+    if (showingEditor) {
+      onBackFromEditor();
+    } else if (activeTab === 'more' && activeMoreScreen !== null) {
+      setActiveMoreScreen(null);
+    }
+  }, [showingEditor, activeTab, activeMoreScreen, onBackFromEditor]);
 
   const handleTabChange = useCallback((tab: MobileTab) => {
     setActiveTab(tab);
     if (tab !== 'more') setActiveMoreScreen(null);
     if (tab !== 'study') setActiveStudyScreen(null);
-  }, []);
+    // When switching to notes tab, go back to list
+    if (tab === 'notes' && hasSelectedNote) {
+      onBackFromEditor();
+    }
+  }, [hasSelectedNote, onBackFromEditor]);
 
   const handleStudySelect = useCallback((sub: StudySubTab) => {
     setActiveStudyScreen(sub);
@@ -210,6 +243,10 @@ export default function MobileShell({
   const renderContent = () => {
     switch (activeTab) {
       case 'notes':
+        // If a note is selected, show editor; otherwise show list
+        if (hasSelectedNote && editorScreen) {
+          return editorScreen;
+        }
         return notesListScreen;
       case 'today':
         return todayScreen;
@@ -225,6 +262,7 @@ export default function MobileShell({
         if (activeMoreScreen === 'passwords') return passwordsScreen;
         if (activeMoreScreen === 'photos') return photosScreen;
         if (activeMoreScreen === 'cloud') return cloudScreen;
+        if (activeMoreScreen === 'messages') return messagesScreen;
         // Default: show a "More" menu grid
         return <MoreMenuGrid onSelect={handleMoreSelect} />;
       default:
@@ -232,17 +270,18 @@ export default function MobileShell({
     }
   };
 
-  const showFAB = activeTab === 'notes';
+  const showFAB = activeTab === 'notes' && !showingEditor;
 
   return (
     <div
       className="flex flex-col h-screen w-screen app-bg overflow-hidden select-none"
-      style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
     >
       {/* Top app bar */}
       <MobileAppBar
         title={appBarTitle}
-        onSearch={onOpenSearch}
+        showBack={showBack}
+        onBack={handleBack}
+        onSearch={!showingEditor ? onOpenSearch : undefined}
       />
 
       {/* Main content area */}
@@ -270,6 +309,7 @@ function MoreMenuGrid({ onSelect }: { onSelect: (sub: MoreSubTab) => void }) {
   const items: { id: MoreSubTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }>; color: string }[] = [
     { id: 'calendar', label: 'Calendar', icon: CalendarDays, color: 'text-emerald-400' },
     { id: 'email', label: 'Email', icon: Mail, color: 'text-amber-400' },
+    { id: 'messages', label: 'Messages', icon: MessageCircle, color: 'text-blue-400' },
     { id: 'passwords', label: 'Vault', icon: KeyRound, color: 'text-indigo-400' },
     { id: 'photos', label: 'Photos', icon: Image, color: 'text-rose-400' },
     { id: 'cloud', label: 'Cloud', icon: Cloud, color: 'text-sky-400' },
