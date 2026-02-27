@@ -47,3 +47,68 @@ jobs:
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
           prerelease: false
+
+  release-android:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Set NDK_HOME
+        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Decode Android keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > /tmp/onyx-release.keystore
+
+      - name: Initialize Tauri Android
+        run: npx tauri android init
+
+      - name: Build Android APK (release)
+        run: npx tauri android build
+        env:
+          VITE_PLATFORM: android
+
+      - name: Sign APK
+        run: |
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+            --ks /tmp/onyx-release.keystore \
+            --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            --ks-pass "pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            --key-pass "pass:${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            "$APK"
+
+      - name: Upload APK to release
+        run: |
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
+          gh release upload "${{ github.ref_name }}" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

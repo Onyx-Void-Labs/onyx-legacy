@@ -220,7 +220,7 @@ export default function TodayPage({ onOpenNote: _onOpenNote }: TodayPageProps) {
 
     return (
         <div className="flex-1 overflow-auto pb-24" style={{ background: 'var(--onyx-bg)' }}>
-            <div className="max-w-2xl mx-auto px-8 pt-10">
+            <div className="max-w-full md:max-w-2xl mx-auto px-4 md:px-8 pt-6 md:pt-10">
                 {/* Greeting */}
                 <p className="text-[13px] text-zinc-500 mb-2">{getGreeting()}, let's get to work.</p>
 

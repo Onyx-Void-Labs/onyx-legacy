@@ -1070,7 +1070,7 @@ fn send_email_sync(
 
     // Build SMTP transport
     let tls_params = TlsParameters::builder(host.to_string())
-        .build_native()
+        .build_rustls()
         .map_err(|e| format!("TLS params error: {}", e))?;
 
     let mut transport_builder = SmtpTransport::starttls_relay(host)

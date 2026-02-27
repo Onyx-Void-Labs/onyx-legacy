@@ -2,6 +2,7 @@ mod commands;
 mod database;
 mod email;
 mod email_client;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod onyx_outlook;
 mod p2p_sync;
 
@@ -13,17 +14,62 @@ use std::sync::Arc;
 use commands::*;
 use email::*;
 use email_client::*;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use onyx_outlook::*;
 use p2p_sync::*;
 
+// Stub commands for Android — Outlook WebView is desktop-only
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod outlook_stubs {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ImportedEmail {
+        pub sender: String,
+        pub subject: String,
+        pub body: String,
+    }
+
+    #[tauri::command]
+    pub fn open_outlook_onyx(_realm: Option<String>) -> Result<(), String> {
+        Err("Outlook WebView is not available on Android".to_string())
+    }
+
+    #[tauri::command]
+    pub fn close_outlook_onyx() -> Result<(), String> {
+        Err("Outlook WebView is not available on Android".to_string())
+    }
+
+    #[tauri::command]
+    pub fn onyx_import_email(_email: ImportedEmail) -> Result<(), String> {
+        Err("Outlook WebView is not available on Android".to_string())
+    }
+
+    #[tauri::command]
+    pub fn outlook_console(_level: String, _message: String) -> Result<(), String> {
+        Ok(()) // silently ignore console forwarding on Android
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use outlook_stubs::*;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_oauth::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init());
+
+    // Updater plugin — desktop only (Android/iOS use app stores)
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
             tauri::async_runtime::block_on(async {
                 let db_pool = Database::setup(app.handle()).await;
@@ -38,18 +84,19 @@ pub fn run() {
             let email_manager = Arc::new(email_client::EmailManager::new());
             app.manage(email_manager);
 
-            // Handle close event — flush P2P ops
-            let p2p_for_close = p2p_manager.clone();
-            let main_window = app.get_webview_window("main");
-            if let Some(window) = main_window {
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
-                        println!("[P2P] App closing — attempting final sync flush...");
-                        // The frontend should have already called flush_p2p_ops
-                        // but as a safety net, signal shutdown
-                        let _ = p2p_for_close.stop_discovery();
-                    }
-                });
+            // Handle close event — flush P2P ops (desktop only, mobile has no close event)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                let p2p_for_close = p2p_manager.clone();
+                let main_window = app.get_webview_window("main");
+                if let Some(window) = main_window {
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { .. } = event {
+                            println!("[P2P] App closing — attempting final sync flush...");
+                            let _ = p2p_for_close.stop_discovery();
+                        }
+                    });
+                }
             }
 
             Ok(())
@@ -86,7 +133,7 @@ pub fn run() {
             fetch_email_body,
             send_email,
             list_email_folders,
-            // Outlook WebView fallback commands
+            // Outlook WebView commands (stubs on Android)
             open_outlook_onyx,
             close_outlook_onyx,
             onyx_import_email,

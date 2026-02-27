@@ -38,6 +38,7 @@ import { CalloutNode } from './extensions/CalloutNode';
 import { MathBlockNode } from './extensions/MathBlockNode';
 import { MarkdownShortcuts } from './extensions/MarkdownShortcuts';
 import { DragHandle } from './extensions/DragHandle';
+import { IS_ANDROID, IS_IOS } from '@/hooks/usePlatform';
 import { SlashCommands } from './extensions/SlashCommands';
 import { SearchReplace } from './extensions/SearchReplace';
 import { NoteLink } from './extensions/NoteLink';
@@ -585,7 +586,8 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                 QueryBlock,
                 // Custom extensions
                 MarkdownShortcuts,
-                DragHandle,
+                // Disable DragHandle on mobile — block dragging is painful on touch
+                ...(IS_ANDROID || IS_IOS ? [] : [DragHandle]),
                 SlashCommands,
                 SearchReplace,
                 // Phase 9 extensions
@@ -886,7 +888,7 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             )}
 
             {/* Title Input */}
-            <div className="px-12 pt-8 pb-4 shrink-0 w-full" style={{ zoom }}>
+            <div className="px-4 md:px-12 pt-8 pb-4 shrink-0 w-full" style={{ zoom }}>
                 <input
                     ref={titleRef}
                     type="text"
@@ -922,7 +924,7 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                 }}
             >
                 <div
-                    className="w-full px-12 relative"
+                    className="w-full px-4 md:px-12 relative"
                     style={{
                         zoom,
                         fontFamily: finalFontFamily,

@@ -212,9 +212,17 @@ pub async fn ensure_local_uuid(pool: State<'_, SqlitePool>, id: i64) -> Result<S
 }
 
 /// Move a file to the system Recycle Bin (Windows) / Trash (macOS/Linux)
+/// On Android, performs a permanent delete since the `trash` crate is desktop-only.
 #[tauri::command]
 pub fn move_to_trash(path: String) -> Result<(), String> {
-    trash::delete(&path).map_err(|e| format!("Failed to move to trash: {}", e))
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        trash::delete(&path).map_err(|e| format!("Failed to move to trash: {}", e))
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))
+    }
 }
 
 /* ─── Transcription (Whisper stub) ────────────────────────────────────── */

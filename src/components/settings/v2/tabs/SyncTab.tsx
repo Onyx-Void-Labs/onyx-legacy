@@ -3,6 +3,7 @@ import {
     Monitor, Wifi, WifiOff, RefreshCw, Trash2,
     Mail, Shield, Server, AlertCircle
 } from 'lucide-react';
+import { IS_TAURI } from '../../../../hooks/usePlatform';
 
 // ─── P2P Settings Section ─────────────────────────────────────────────────────
 
@@ -10,7 +11,7 @@ function P2PSection() {
     const [enabled, setEnabled] = useState(() => {
         return localStorage.getItem('onyx-p2p-enabled') === 'true';
     });
-    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    const isTauri = IS_TAURI;
 
     useEffect(() => {
         localStorage.setItem('onyx-p2p-enabled', String(enabled));

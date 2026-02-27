@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { IS_TAURI, IS_ANDROID, IS_IOS } from '../hooks/usePlatform';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,9 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const [status, setStatus] = useState<P2PStatus | null>(null);
 
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    const isTauri = IS_TAURI;
+    // P2P uses TCP/UDP multicast — not supported on Android/iOS
+    const isP2PSupported = isTauri && !IS_ANDROID && !IS_IOS;
 
     // ─── Enable/Disable P2P ───────────────────────────────────────────────
 
@@ -82,7 +85,7 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setEnabledState(value);
         localStorage.setItem(P2P_SETTINGS_KEY, value.toString());
 
-        if (!isTauri) return;
+        if (!isP2PSupported) return;
 
         try {
             if (value) {
@@ -98,12 +101,12 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             console.error('[P2P] Toggle error:', err);
             setConnectionState('error');
         }
-    }, [isTauri]);
+    }, [isP2PSupported]);
 
     // ─── Poll for peers and status ────────────────────────────────────────
 
     const refreshPeers = useCallback(async () => {
-        if (!isTauri || !enabled) return;
+        if (!isP2PSupported || !enabled) return;
 
         try {
             const result = await invoke<P2PStatus>('get_p2p_status');
@@ -119,11 +122,11 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (err) {
             console.error('[P2P] Status poll error:', err);
         }
-    }, [isTauri, enabled]);
+    }, [isP2PSupported, enabled]);
 
     // Start/stop polling when enabled state changes
     useEffect(() => {
-        if (enabled && isTauri) {
+        if (enabled && isP2PSupported) {
             // Initial enable
             invoke('enable_p2p').catch(console.error);
             setConnectionState('scanning');
@@ -144,12 +147,12 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 pollRef.current = null;
             }
         };
-    }, [enabled, isTauri, refreshPeers]);
+    }, [enabled, isP2PSupported, refreshPeers]);
 
     // ─── Sync with peer ───────────────────────────────────────────────────
 
     const syncWithPeer = useCallback(async (peerId: string, encryptedPayload: string, room: string) => {
-        if (!isTauri) return;
+        if (!isP2PSupported) return;
 
         setConnectionState('syncing');
         try {
@@ -169,12 +172,12 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }, 3000);
             throw err;
         }
-    }, [isTauri, peers.length]);
+    }, [isP2PSupported, peers.length]);
 
     // ─── Flush ops on close ───────────────────────────────────────────────
 
     const flushOps = useCallback(async (encryptedPayload: string, room: string): Promise<number> => {
-        if (!isTauri || !enabled) return 0;
+        if (!isP2PSupported || !enabled) return 0;
 
         try {
             const count = await invoke<number>('flush_p2p_ops', {
@@ -186,12 +189,12 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             console.error('[P2P] Flush error:', err);
             return 0;
         }
-    }, [isTauri, enabled]);
+    }, [isP2PSupported, enabled]);
 
     // ─── Listen for incoming P2P sync messages from Rust ──────────────────
 
     useEffect(() => {
-        if (!isTauri) return;
+        if (!isP2PSupported) return;
 
         let unlisten: (() => void) | null = null;
 
@@ -211,13 +214,13 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return () => {
             if (unlisten) unlisten();
         };
-    }, [isTauri]);
+    }, [isP2PSupported]);
 
     // ─── Cleanup on unmount ───────────────────────────────────────────────
 
     useEffect(() => {
         return () => {
-            if (isTauri && enabled) {
+            if (isP2PSupported && enabled) {
                 invoke('disable_p2p').catch(() => {});
             }
         };

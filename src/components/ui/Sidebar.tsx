@@ -6,6 +6,7 @@ import { useSync } from "../../contexts/SyncContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { NoteTypeIcon } from "../../lib/noteIcons";
 import type { FileMeta, NoteType } from "../../types/sync";
+import { usePlatform } from "../../hooks/usePlatform";
 
 type Note = {
     id: string;
@@ -76,6 +77,7 @@ export default function Sidebar({
     onGoToCanvas,
 }: SidebarProps) {
 
+    const { isMobile } = usePlatform();
     const [lockingNoteId, setLockingNoteId] = useState<string | null>(null);
     const [lockingNoteTitle, setLockingNoteTitle] = useState("");
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(DEFAULT_EXPANDED);
@@ -199,7 +201,7 @@ export default function Sidebar({
     const quickActionBase = `w-full flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer ${hoverTransition} text-zinc-500 hover:text-zinc-100 hover:bg-[rgba(124,110,247,0.08)] hover:translate-x-0.5`;
 
     return (
-        <aside className="w-55 h-full text-zinc-400 flex flex-col border-r border-zinc-800/40" style={{ background: 'var(--onyx-sidebar)' }}>
+        <aside className={`${isMobile ? 'w-full' : 'w-55'} h-full text-zinc-400 flex flex-col ${isMobile ? '' : 'border-r border-zinc-800/40'}`} style={{ background: 'var(--onyx-sidebar)' }}>
             <LockModal
                 isOpen={!!lockingNoteId}
                 onClose={() => setLockingNoteId(null)}
@@ -221,47 +223,36 @@ export default function Sidebar({
                 >
                     <Search size={14} className="group-focus:text-violet-400 transition-colors" />
                     <span className="text-[13px]">Search</span>
-                    <span className="ml-auto text-[10px] text-zinc-600 font-mono">Ctrl+P</span>
+                    {!isMobile && <span className="ml-auto text-[10px] text-zinc-600 font-mono">Ctrl+P</span>}
                 </button>
 
-                {/* Today button */}
-                <button
-                    onClick={onGoToToday}
-                    className={quickActionBase}
-                >
-                    <CalendarHeart size={14} />
-                    <span className="text-[13px] font-medium">Today</span>
-                </button>
+                {/* Today / Flashcards / Questions / Canvas — hidden on mobile (handled by BottomTabBar) */}
+                {!isMobile && (
+                    <>
+                        <button onClick={onGoToToday} className={quickActionBase}>
+                            <CalendarHeart size={14} />
+                            <span className="text-[13px] font-medium">Today</span>
+                        </button>
 
-                {/* Flashcards button */}
-                <button
-                    onClick={onGoToFlashcards}
-                    className={quickActionBase}
-                >
-                    <BookOpen size={14} />
-                    <span className="text-[13px] font-medium">Flashcards</span>
-                </button>
+                        <button onClick={onGoToFlashcards} className={quickActionBase}>
+                            <BookOpen size={14} />
+                            <span className="text-[13px] font-medium">Flashcards</span>
+                        </button>
 
-                {/* Questions button — gated by feature flag */}
-                {onGoToQuestions && (
-                    <button
-                        onClick={onGoToQuestions}
-                        className={quickActionBase}
-                    >
-                        <HelpCircle size={14} />
-                        <span className="text-[13px] font-medium">Questions</span>
-                    </button>
-                )}
+                        {onGoToQuestions && (
+                            <button onClick={onGoToQuestions} className={quickActionBase}>
+                                <HelpCircle size={14} />
+                                <span className="text-[13px] font-medium">Questions</span>
+                            </button>
+                        )}
 
-                {/* Canvas button — gated by feature flag */}
-                {onGoToCanvas && (
-                    <button
-                        onClick={onGoToCanvas}
-                        className={quickActionBase}
-                    >
-                        <LayoutDashboard size={14} />
-                        <span className="text-[13px] font-medium">Canvas</span>
-                    </button>
+                        {onGoToCanvas && (
+                            <button onClick={onGoToCanvas} className={quickActionBase}>
+                                <LayoutDashboard size={14} />
+                                <span className="text-[13px] font-medium">Canvas</span>
+                            </button>
+                        )}
+                    </>
                 )}
 
                 {/* New Page — primary CTA with more pronounced hover */}

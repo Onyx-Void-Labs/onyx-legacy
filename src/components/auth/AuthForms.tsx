@@ -10,6 +10,7 @@ import * as bip39 from 'bip39';
 import {
     Loader2, ShieldCheck, ChevronRight, Check, ArrowLeft, Fingerprint, Lock, Mail, RefreshCw, Shield, Copy, Eye, EyeOff, QrCode, ArrowRight, X
 } from 'lucide-react';
+import { IS_TAURI } from '../../hooks/usePlatform';
 
 
 
@@ -835,8 +836,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
 
                     // Success!
                     // If we are in the Browser (not Tauri), we display the token for the user to copy.
-                    // @ts-ignore
-                    if (!window.__TAURI__) {
+                    if (!IS_TAURI) {
                         setManualAuthResult({ token: pb.authStore.token, record: pb.authStore.model });
                         return; // Stop here, let UI show the token
                     }
@@ -940,8 +940,7 @@ export default function AuthForms({ onSuccess, onCancel }: AuthFormsProps) {
 
     const handleOAuth = async (providerName: string) => {
         setLoading(true);
-        // @ts-ignore
-        const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
+        const isTauri = IS_TAURI;
 
         try {
             console.log("Fetching auth methods...");

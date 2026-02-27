@@ -3,6 +3,7 @@ import { Minus, Square, X, PanelLeftClose, PanelLeft, PenLine, MessageCircle, Ca
 import { useState, useRef, useEffect } from 'react';
 import { useWorkspace, MODULE_ORDER, MODULES, type WorkspaceModule } from '../../contexts/WorkspaceContext';
 import { useSettings } from '../../contexts/SettingsContext';
+import { usePlatform } from '../../hooks/usePlatform';
 import SyncStatusIndicator from './SyncStatusIndicator';
 
 // Map module IDs → Lucide icon components
@@ -22,12 +23,12 @@ interface TitlebarProps {
 }
 
 export default function Titlebar({ sidebarCollapsed, onToggleSidebar }: TitlebarProps) {
+    const { isDesktop, isTauri: isTauriPlatform } = usePlatform();
+
     // Robust detection for Tauri v2 window
     let appWindow: any = null;
-    // @ts-ignore
-    const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
 
-    if (isTauri) {
+    if (isTauriPlatform && isDesktop) {
         try {
             // @ts-ignore
             appWindow = getCurrentWindow();
@@ -132,9 +133,9 @@ export default function Titlebar({ sidebarCollapsed, onToggleSidebar }: Titlebar
     return (
         <header
             className="h-11 bg-zinc-950/90 backdrop-blur-md flex items-center justify-between select-none shrink-0 border-b border-zinc-800/40 z-50 relative"
-            data-tauri-drag-region
+            data-tauri-drag-region={isDesktop ? true : undefined}
             onDoubleClick={(e) => {
-                if ((e.target as HTMLElement).dataset.tauriDragRegion !== undefined) handleMaximize();
+                if (isDesktop && (e.target as HTMLElement).dataset.tauriDragRegion !== undefined) handleMaximize();
             }}
         >
             {/* LEFT: Sidebar Toggle + ONYX Branding */}
@@ -287,9 +288,9 @@ export default function Titlebar({ sidebarCollapsed, onToggleSidebar }: Titlebar
                     )}
                 </div>
 
-                {/* Window Controls — hidden in demo mode */}
+                {/* Window Controls — hidden in demo mode and on non-desktop platforms */}
                 <SyncStatusIndicator />
-                {!import.meta.env.VITE_DEMO_MODE && (
+                {!import.meta.env.VITE_DEMO_MODE && isDesktop && (
                     <>
                         <button onClick={handleMinimize} className="h-full w-11 flex items-center justify-center hover:bg-zinc-800 text-zinc-500 hover:text-zinc-200 transition-colors">
                             <Minus size={14} />

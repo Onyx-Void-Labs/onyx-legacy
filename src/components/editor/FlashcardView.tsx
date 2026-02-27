@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useSwipeGesture } from '@/hooks/useSwipeGesture';
+import { usePlatform } from '@/hooks/usePlatform';
 import {
     BookOpen,
     RotateCcw,
@@ -1360,6 +1362,7 @@ function CardEditorModal({
    ═══════════════════════════════════════════════════════════ */
 
 export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardViewProps) {
+    const { isTouch } = usePlatform();
     const [mode, setMode] = useState<'menu' | 'review' | 'manage' | 'results'>('menu');
     const [dueCards, setDueCards] = useState<Flashcard[]>([]);
     const [allCards, setAllCards] = useState<Flashcard[]>([]);
@@ -1536,6 +1539,15 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
         },
         [filteredDue, currentIdx, refresh],
     );
+
+    // Swipe gestures for touch-based flashcard rating
+    const swipeHandlers = useSwipeGesture({
+        onSwipeRight: () => { if (flipped) handleRate('good'); },
+        onSwipeLeft: () => { if (flipped) handleRate('again'); },
+        onSwipeUp: () => { if (flipped) handleRate('easy'); },
+        onSwipeDown: () => { if (!flipped) setFlipped(true); },
+        threshold: 60,
+    });
 
     const resetCreationForm = useCallback(() => {
         setNewFront('');
@@ -2309,7 +2321,13 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
     if (mode === 'review' && currentCard) {
         return (
             <div className="flex-1 overflow-auto pb-24" style={{ background: 'var(--onyx-editor)' }}>
-                <div className="max-w-xl mx-auto px-8 pt-10">
+                <div className={`max-w-xl mx-auto px-4 md:px-8 pt-6 md:pt-10`} {...(isTouch ? swipeHandlers : {})}>
+                    {/* Swipe hint for touch devices */}
+                    {isTouch && flipped && (
+                        <div className="text-center text-[10px] text-zinc-600 mb-2 animate-fade-in-up">
+                            Swipe: ← Again · → Good · ↑ Easy
+                        </div>
+                    )}
                     {/* Session stats bar */}
                     <div className="flex items-center justify-between mb-4">
                         <button
@@ -2419,14 +2437,13 @@ export default function FlashcardView({ onOpenNote: _onOpenNote }: FlashcardView
                     {/* Rating buttons */}
                     {flipped && (
                         <div className="grid grid-cols-4 gap-2 mt-4">
-                            {RATING_BUTTONS.map(({ rating, label, color, shortcut }) => (
+                            {RATING_BUTTONS.map(({ rating, label, color }) => (
                                 <button
                                     key={rating}
                                     onClick={() => handleRate(rating)}
                                     className={`px-3 py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${color}`}
                                 >
                                     <span>{label}</span>
-                                    <span className="block text-[10px] opacity-50 mt-0.5">{shortcut}</span>
                                 </button>
                             ))}
                         </div>

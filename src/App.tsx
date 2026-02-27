@@ -30,6 +30,11 @@ import AuthModal from "@/components/auth/AuthModal";
 
 import type { NoteType, FileMeta } from "@/types/sync";
 
+// Mobile Layout
+import { usePlatform } from "@/hooks/usePlatform";
+import MobileShell from "@/components/layout/MobileShell";
+import BottomSheet from "@/components/layout/BottomSheet";
+
 // Module Views
 import MessagesView from "@/components/messages/MessagesView";
 import CalendarView from "@/components/calendar/CalendarView";
@@ -53,6 +58,7 @@ function AppContent() {
   const { files, deleteFile, createFile, updateFile } = useSync();
   const { toggleSettings, settings } = useSettings();
   const { activeWorkspace } = useWorkspace();
+  const { isMobile, isTauri: isTauriPlatform } = usePlatform();
 
   // Local UI State
   const [tabs, setTabs] = useState<string[]>([]);
@@ -74,8 +80,7 @@ function AppContent() {
 
   // ─── Forward console messages from embedded Outlook WebView ──────
   useEffect(() => {
-    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
-    if (!isTauri) return;
+    if (!isTauriPlatform) return;
 
     let cancelled = false;
     const unlistenPromise = listen<{ level: string; message: string }>(
@@ -473,6 +478,115 @@ function AppContent() {
     if (isTask) setPropertiesPanelOpen(true);
   }, [activeTabId, isTask]);
 
+  // ─── Mobile Layout (Phone) ────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <>
+        <MobileShell
+          notesListScreen={
+            <ErrorBoundary fallbackTitle="Notes list crashed">
+              <Sidebar
+                onSelectNote={(id) => openTab(id, true)}
+                activeNoteId={activeTabId}
+                notes={files}
+                openTabs={tabs}
+                onDeleteNote={handleDeleteNote}
+                onOpenSearch={() => setSearchOpen(true)}
+                onLockNote={handleLockNote}
+                onOpenAuth={() => toggleSettings(true)}
+                onNewNote={() => setTypePickerOpen(true)}
+                onGoToToday={handleGoToToday}
+                onGoToFlashcards={handleGoToFlashcards}
+                onOpenCollection={handleOpenCollection}
+                onGoToTrash={handleGoToTrash}
+                onGoToQuestions={handleGoToQuestions}
+                onGoToCanvas={handleGoToCanvas}
+              />
+            </ErrorBoundary>
+          }
+          todayScreen={
+            <ErrorBoundary fallbackTitle="Today page crashed">
+              <TodayPage onOpenNote={(id) => openTab(id, true)} />
+            </ErrorBoundary>
+          }
+          flashcardsScreen={
+            <ErrorBoundary fallbackTitle="Flashcards crashed">
+              <FlashcardView onOpenNote={(id) => openTab(id, true)} />
+            </ErrorBoundary>
+          }
+          questionsScreen={
+            <ErrorBoundary fallbackTitle="Questions crashed">
+              <QuestionLibrary />
+            </ErrorBoundary>
+          }
+          calendarScreen={
+            <ErrorBoundary fallbackTitle="Calendar crashed">
+              <CalendarView />
+            </ErrorBoundary>
+          }
+          emailScreen={
+            <ErrorBoundary fallbackTitle="Email crashed">
+              <EmailView />
+            </ErrorBoundary>
+          }
+          passwordsScreen={
+            <ErrorBoundary fallbackTitle="Passwords crashed">
+              <PasswordsView />
+            </ErrorBoundary>
+          }
+          photosScreen={
+            <ErrorBoundary fallbackTitle="Photos crashed">
+              <PhotosView />
+            </ErrorBoundary>
+          }
+          cloudScreen={
+            <ErrorBoundary fallbackTitle="Cloud crashed">
+              <CloudView />
+            </ErrorBoundary>
+          }
+          onOpenSearch={() => setSearchOpen(true)}
+          onNewNote={() => setTypePickerOpen(true)}
+          onOpenSettings={() => toggleSettings(true)}
+        />
+
+        {/* Properties as bottom sheet on mobile */}
+        <BottomSheet
+          isOpen={propertiesPanelOpen && !!activeNoteMeta}
+          onClose={() => setPropertiesPanelOpen(false)}
+          title="Properties"
+        >
+          {activeNoteMeta && activeTabId && (
+            <PropertiesPanel
+              noteId={activeTabId}
+              meta={activeNoteMeta}
+              onClose={() => setPropertiesPanelOpen(false)}
+            />
+          )}
+        </BottomSheet>
+
+        <SearchModal
+          isOpen={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          notes={files}
+          onSelectNote={handleSearchSelect}
+        />
+
+        <SettingsModal user={user} onLogout={handleLogout} />
+        <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+        <NoteTypePicker
+          isOpen={typePickerOpen}
+          onClose={() => setTypePickerOpen(false)}
+          onSelect={handleNewNoteWithType}
+        />
+
+        {showOnboarding && (
+          <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+        )}
+      </>
+    );
+  }
+
+  // ─── Desktop / Tablet Layout ──────────────────────────────────────
   return (
     <div className="flex flex-col h-screen w-screen app-bg overflow-hidden select-none rounded-lg relative">
       <Titlebar

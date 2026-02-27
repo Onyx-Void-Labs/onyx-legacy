@@ -8,6 +8,7 @@ import {
     MailPlus, Shield, RefreshCw, ChevronLeft, Reply, ReplyAll, Forward,
     X, AlertCircle, Plus, Loader2, ExternalLink
 } from 'lucide-react';
+import { IS_TAURI } from '../../hooks/usePlatform';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -255,7 +256,7 @@ function AccountSetupModal({
     const [manualSmtpPort, setManualSmtpPort] = useState('587');
     const [oauthLoading, setOauthLoading] = useState(false);
 
-    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    const isTauri = IS_TAURI;
 
     const handleDetectProvider = async () => {
         if (!email.includes('@')) {
@@ -889,7 +890,7 @@ export default function EmailView() {
     const [outlookToast, setOutlookToast] = useState<string | null>(null);
     const [outlookOpen, setOutlookOpen] = useState(false);
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    const isTauri = IS_TAURI;
     const activeAccount = accounts.find(a => a.id === activeAccountId) || null;
 
     // ─── Listen for Outlook WebView events ─────────────────────────────

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+/* ─── ANDROID / MOBILE SAFE AREA INSETS ─── */
 :root {
   --font-sans: 'DM Sans', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -9,7 +10,15 @@
   --onyx-card: #1c1c21;
   --onyx-accent: #7c6ef7;
   --onyx-accent-soft: rgba(124, 110, 247, 0.12);
+  /* Safe area insets for Android/iOS — used by BottomTabBar, MobileShell, BottomSheet */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
 }
+
+/* Safe area insets are handled at the component level (BottomTabBar, MobileShell, etc.)
+   Do NOT apply padding on html — it causes double-inset issues on Android. */
 
 body {
   font-family: var(--font-sans);

@@ -76,9 +76,12 @@ pub struct P2PManager {
 impl P2PManager {
     pub fn new() -> Self {
         let device_id = uuid::Uuid::new_v4().to_string();
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let device_name = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
             .unwrap_or_else(|_| "Onyx Device".to_string());
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let device_name = "Onyx Mobile".to_string();
 
         Self {
             peers: Arc::new(Mutex::new(HashMap::new())),
