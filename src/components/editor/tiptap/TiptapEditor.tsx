@@ -42,7 +42,6 @@ import { SlashCommands } from './extensions/SlashCommands';
 import { SearchReplace } from './extensions/SearchReplace';
 import { NoteLink } from './extensions/NoteLink';
 import { QueryBlock } from './extensions/QueryBlock';
-import { FontSize } from './extensions/FontSize';
 import { BlockId } from './extensions/BlockId';
 import { RecallMark } from './extensions/RecallMark';
 import { SmartMathExtension } from './extensions/SmartMathExtension';
@@ -523,7 +522,6 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                     mergeNestedSpanStyles: true,
                 }),
                 FontFamily,
-                FontSize,
                 Color,
                 Link.configure({
                     openOnClick: false,

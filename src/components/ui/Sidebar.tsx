@@ -5,7 +5,7 @@ import LockModal from "./LockModal";
 import { useSync } from "../../contexts/SyncContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { NoteTypeIcon } from "../../lib/noteIcons";
-import type { NoteType } from "../../types/sync";
+import type { FileMeta, NoteType } from "../../types/sync";
 
 type Note = {
     id: string;
@@ -157,7 +157,7 @@ export default function Sidebar({
             if (typeof type !== 'string' || !(type in groups)) {
                 type = 'note';
             }
-            groups[type].push({ ...n, meta });
+            groups[type as NoteType].push({ ...n, meta });
         }
 
         // Sort each group by updatedAt descending
