@@ -46,7 +46,6 @@
     ],
     "macOS": {
       "signingIdentity": null,
-      "providerShortname": null,
       "entitlements": null
     },
     "android": {
