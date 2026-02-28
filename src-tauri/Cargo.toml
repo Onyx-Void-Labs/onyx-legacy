@@ -36,6 +36,9 @@ base64 = "0.22"
 url = "2"
 regex-lite = "0.1"
 
+[lints.rust]
+unused_mut = "allow"
+
 [profile.release]
 opt-level = "s"          # Optimize for size (ideal for mobile APK)
 lto = "fat"              # Full cross-crate LTO — max dead-code elimination

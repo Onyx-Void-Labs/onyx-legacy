@@ -44,6 +44,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "signingIdentity": null,
+      "providerShortname": null,
+      "entitlements": null
+    },
     "android": {
       "minSdkVersion": 24
     },

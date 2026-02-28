@@ -188,67 +188,16 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      # ── Inject signing config into Tauri-generated build.gradle.kts ──
+      # ── Replace Tauri-generated build.gradle.kts with our signing-ready template ──
       # gen/ is gitignored → tauri android init generates a DEFAULT build.gradle.kts
-      # with NO signing config. We must patch it before building.
-      - name: Inject Gradle signing config
+      # with NO signing config. We replace it with our tracked template that has
+      # keystore loading + signingConfigs already wired up correctly.
+      - name: Install signing-ready build.gradle.kts
         if: matrix.suffix == 'android-aarch64'
         run: |
-          GRADLE_FILE="src-tauri/gen/android/app/build.gradle.kts"
-          if grep -q "keystoreProperties" "$GRADLE_FILE"; then
-            echo "✅ Signing config already present"
-            exit 0
-          fi
-          echo "🔧 Patching generated build.gradle.kts with signing config..."
-          python3 -c "
-          path = 'src-tauri/gen/android/app/build.gradle.kts'
-          with open(path) as f: content = f.read()
-
-          # Prepend keystore properties loader (before plugins block)
-          header = '''import java.util.Properties
-
-          val keystoreProperties = Properties().apply {
-              for (name in listOf(\"keystore.properties\", \"key.properties\")) {
-                  val f = rootProject.file(name)
-                  if (f.exists()) { f.inputStream().use { load(it) }; println(\"Loaded keystore: \" + f.absolutePath); return@apply }
-              }
-              println(\"WARNING: no keystore.properties found\")
-          }
-
-          '''
-
-          # Fix indentation (strip leading spaces from heredoc)
-          import textwrap
-          header = textwrap.dedent(header)
-          content = header + content
-
-          # Inject signingConfigs block inside android { }
-          signing = '''
-              signingConfigs {
-                  create(\"release\") {
-                      val ksPath = keystoreProperties.getProperty(\"storeFile\")
-                      if (ksPath != null) {
-                          storeFile = rootProject.file(ksPath)
-                          storePassword = keystoreProperties.getProperty(\"storePassword\") ?: \"\"
-                          keyAlias = keystoreProperties.getProperty(\"keyAlias\") ?: \"\"
-                          keyPassword = keystoreProperties.getProperty(\"keyPassword\") ?: \"\"
-                      }
-                  }
-              }
-          '''
-          signing = textwrap.dedent(signing)
-          content = content.replace('android {', 'android {\n' + signing, 1)
-
-          # Wire release buildType to use the signing config
-          content = content.replace(
-              'getByName(\"release\") {',
-              'getByName(\"release\") {\n            signingConfig = signingConfigs.getByName(\"release\")',
-              1
-          )
-
-          with open(path, 'w') as f: f.write(content)
-          print('✅ Gradle signing config injected')
-          "
+          cp src-tauri/android-build.gradle.kts src-tauri/gen/android/app/build.gradle.kts
+          echo "✅ Replaced generated build.gradle.kts with signing-ready template"
+          head -20 src-tauri/gen/android/app/build.gradle.kts
 
       # ── Build (skip beforeBuildCommand — dist already exists) ──
       - name: Build Android
@@ -323,9 +272,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Apple codesigning disabled for dev builds (signingIdentity: null in tauri.conf.json)
+          # Re-enable these when Apple Developer certificates are configured:
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
