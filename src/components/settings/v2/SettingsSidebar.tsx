@@ -1,4 +1,4 @@
-import { User, Palette, Code, Database, Zap, Info, Cpu, Key, Shield, RefreshCw, ChevronRight } from 'lucide-react';
+import { User, Palette, Code, Database, Zap, Info, Cpu, Key, Shield, RefreshCw, ChevronRight, Image, Cloud } from 'lucide-react';
 
 interface SettingsSidebarProps {
     activeTab: string;
@@ -37,6 +37,8 @@ export default function SettingsSidebar({ activeTab, setActiveTab, user, isMobil
                 { id: 'features', label: 'Features', icon: Zap },
                 { id: 'storage', label: 'Data', icon: Database },
                 { id: 'sync', label: 'Sync & Email', icon: RefreshCw },
+                { id: 'photos', label: 'Photos', icon: Image },
+                { id: 'cloud', label: 'Cloud Drive', icon: Cloud },
             ]
         },
     ];

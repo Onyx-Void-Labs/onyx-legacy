@@ -1817,8 +1817,8 @@ fn imap_authenticate<C: std::io::Read + std::io::Write>(
 
 // ─── XOAUTH2 Authenticator ──────────────────────────────────────────────────
 
-struct XOAuth2Authenticator {
-    response: String,
+pub struct XOAuth2Authenticator {
+    pub response: String,
 }
 
 impl imap::Authenticator for XOAuth2Authenticator {

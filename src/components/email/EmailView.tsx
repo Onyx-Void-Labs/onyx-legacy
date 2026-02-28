@@ -36,6 +36,9 @@ import {
     type SpamAnalysis,
 } from '../../store/emailStore';
 
+// SQLite-backed email cache layer (Module 1 enhancement)
+import { useLiveEmails, toEmailHeader } from '../../hooks/useLiveEmails';
+
 /* ─── Constants ──────────────────────────────────────────────── */
 
 const ACCOUNTS_STORAGE_KEY = 'onyx-email-accounts';
@@ -249,6 +252,27 @@ export default function EmailView() {
         ? storeFiltered.filter(e => e.accountId === activeAccountId)
         : storeFiltered;
     const selectedEmail = unifiedInbox.find(e => e.uid === selectedEmailUid && (!activeAccountId || e.accountId === activeAccountId)) || null;
+
+    // ─── SQLite cache integration (Module 1) ─────────────────────
+    // This hooks into the Rust-side BackgroundSyncer + OAuthInterceptor
+    // for zero-latency email loading and automatic token refresh.
+    const cacheAccount = activeAccount || accounts[0] || null;
+    const liveCache = useLiveEmails({
+        account: cacheAccount,
+        folder: activeFolder,
+        autoSync: true,
+    });
+
+    // Merge SQLite cached emails into the unified inbox on first load
+    // This provides instant rendering before IMAP fetch completes
+    useEffect(() => {
+        if (liveCache.emails.length > 0 && unifiedInbox.length === 0 && cacheAccount) {
+            const cacheHeaders = liveCache.emails.map(e => toEmailHeader(e));
+            if (cacheHeaders.length > 0) {
+                appendToInbox(cacheHeaders, cacheAccount.id);
+            }
+        }
+    }, [liveCache.emails.length]);
 
     // ─── Category counts ────────────────────────────────────────
     const categoryCounts = useMemo(() => {

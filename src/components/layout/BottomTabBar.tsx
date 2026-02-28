@@ -96,10 +96,10 @@ export default function BottomTabBar({ activeTab, onTabChange, onStudySelect, on
       )}
       {/* Tab bar */}
       <nav
-        className="shrink-0 bg-zinc-950/95 backdrop-blur-lg border-t border-zinc-800/50 z-50"
-        style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
+        className="shrink-0 bg-zinc-950/98 backdrop-blur-xl border-t border-zinc-800/40 z-50"
+        style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)' }}
       >
-        <div className="flex items-center justify-around h-14">
+        <div className="flex items-center justify-around h-16">
           {TABS.map(tab => {
             const isActive = activeTab === tab.id;
             const Icon = tab.icon;
@@ -109,20 +109,18 @@ export default function BottomTabBar({ activeTab, onTabChange, onStudySelect, on
                 key={tab.id}
                 onClick={() => handleTabPress(tab.id)}
                 className={`
-                  flex flex-col items-center justify-center gap-0.5 flex-1 h-full
-                  transition-colors duration-150 relative
+                  flex flex-col items-center justify-center gap-1 flex-1 h-full
+                  transition-all duration-200 relative
                   ${isActive
                     ? 'text-purple-400'
-                    : 'text-zinc-500 active:text-zinc-300'
+                    : 'text-zinc-600 active:text-zinc-400'
                   }
                 `}
               >
-                <Icon size={20} />
-                <span className="text-[10px] font-medium leading-tight">{tab.label}</span>
-                {/* Active indicator dot */}
-                {isActive && (
-                  <div className="absolute top-1 w-1 h-1 rounded-full bg-purple-400" />
-                )}
+                <div className={`relative p-1.5 rounded-xl transition-all duration-200 ${isActive ? 'bg-purple-500/10 scale-105' : ''}`}>
+                  <Icon size={20} />
+                </div>
+                <span className={`text-[10px] leading-tight transition-all ${isActive ? 'font-bold' : 'font-medium'}`}>{tab.label}</span>
               </button>
             );
           })}

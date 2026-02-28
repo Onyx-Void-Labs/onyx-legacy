@@ -5,7 +5,12 @@ mod email;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod email_client;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod email_cache;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod onyx_outlook;
+mod messaging;
+mod photos;
+mod cloud;
 mod p2p_sync;
 
 use database::Database;
@@ -19,7 +24,12 @@ use email::*;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use email_client::*;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+use email_cache::*;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use onyx_outlook::*;
+use messaging::*;
+use photos::*;
+use cloud::*;
 use p2p_sync::*;
 
 // Stub commands for Android — Outlook WebView is desktop-only
@@ -249,6 +259,112 @@ mod outlook_stubs {
     pub fn sanitize_email_html(_html: String, _dark_mode: bool) -> String {
         String::new()
     }
+
+    // ─── Email Cache stubs (desktop-only IMAP syncer) ─────────────────────────
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct CachedEmailHeader {
+        pub id: i64,
+        pub account_id: String,
+        pub uid: u32,
+        pub message_id: String,
+        pub folder: String,
+        pub from_address: String,
+        pub from_name: String,
+        pub to_address: String,
+        pub subject: String,
+        pub preview: String,
+        pub date_str: String,
+        pub date_epoch: i64,
+        pub is_read: bool,
+        pub is_starred: bool,
+        pub has_attachments: bool,
+        pub in_reply_to: Option<String>,
+        pub references_header: Option<String>,
+        pub category: String,
+    }
+
+    #[tauri::command]
+    pub async fn get_cached_emails(
+        _account_id: String, _folder: String, _category: Option<String>,
+        _offset: i64, _limit: i64,
+    ) -> Result<Vec<CachedEmailHeader>, String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn get_cached_email_body(
+        _account_id: String, _uid: u32,
+    ) -> Result<serde_json::Value, String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn search_cached_emails(
+        _query: String, _account_id: Option<String>, _limit: i64,
+    ) -> Result<Vec<CachedEmailHeader>, String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn get_unread_count(
+        _account_id: String, _folder: String,
+    ) -> Result<i64, String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn register_email_token(
+        _account_id: String, _access_token: String, _refresh_token: Option<String>,
+        _expires_in: u64, _provider: String, _client_id: String,
+    ) -> Result<(), String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn start_email_sync(
+        _account_id: String, _imap_host: String, _imap_port: u16,
+        _email: String, _auth_method: String, _password: Option<String>,
+        _folders: Vec<String>,
+    ) -> Result<(), String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn stop_email_sync(_account_id: String) -> Result<(), String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn force_email_sync(
+        _account_id: String, _imap_host: String, _imap_port: u16,
+        _email: String, _auth_method: String, _password: Option<String>,
+        _folder: String,
+    ) -> Result<(), String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn fetch_and_cache_email_body(
+        _account_id: String, _uid: u32, _imap_host: String, _imap_port: u16,
+        _email_addr: String, _auth_method: String, _password: Option<String>,
+        _folder: String,
+    ) -> Result<serde_json::Value, String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn mark_cached_email_read(
+        _account_id: String, _uid: u32, _folder: String, _read: bool,
+        _imap_host: String, _imap_port: u16, _email_addr: String,
+        _auth_method: String, _password: Option<String>,
+    ) -> Result<(), String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn purge_email_cache(_account_id: String) -> Result<(), String> {
+        Err("Email cache is not available on mobile".to_string())
+    }
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -273,7 +389,43 @@ pub fn run() {
         .setup(|app| {
             tauri::async_runtime::block_on(async {
                 let db_pool = Database::setup(app.handle()).await;
-                app.manage(db_pool);
+
+                // Run email cache migrations
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                {
+                    if let Err(e) = email_cache::EmailCacheDb::migrate(&db_pool).await {
+                        eprintln!("[EmailCache] Migration failed: {}", e);
+                    }
+                    // Run messaging DB migrations
+                    if let Err(e) = messaging::MessagingDb::migrate(&db_pool).await {
+                        eprintln!("[Messaging] Migration failed: {}", e);
+                    }
+                }
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                {
+                    if let Err(e) = messaging::MessagingDb::migrate(&db_pool).await {
+                        eprintln!("[Messaging] Migration failed: {}", e);
+                    }
+                }
+
+                // Photos & Cloud Drive migrations (all platforms)
+                if let Err(e) = photos::PhotosDb::migrate(&db_pool).await {
+                    eprintln!("[Photos] Migration failed: {}", e);
+                }
+                if let Err(e) = cloud::CloudDb::migrate(&db_pool).await {
+                    eprintln!("[Cloud] Migration failed: {}", e);
+                }
+
+                app.manage(db_pool.clone());
+
+                // Initialize OAuth interceptor + background syncer (desktop only)
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                {
+                    let interceptor = Arc::new(email_cache::OAuthInterceptor::new());
+                    let syncer = Arc::new(email_cache::BackgroundSyncer::new(db_pool.clone(), interceptor.clone()));
+                    app.manage(interceptor);
+                    app.manage(syncer);
+                }
             });
 
             // Initialize P2P manager
@@ -283,6 +435,10 @@ pub fn run() {
             // Initialize Email manager
             let email_manager = Arc::new(EmailManager::new());
             app.manage(email_manager);
+
+            // Initialize Messaging manager
+            let msg_manager = Arc::new(messaging::MessagingManager::new());
+            app.manage(msg_manager);
 
             // Handle close event — flush P2P ops (desktop only, mobile has no close event)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -340,11 +496,72 @@ pub fn run() {
             fetch_spam_analysis,
             search_emails,
             sanitize_email_html,
+            // Email Cache commands (local SQLite cache + background sync)
+            get_cached_emails,
+            get_cached_email_body,
+            search_cached_emails,
+            get_unread_count,
+            register_email_token,
+            start_email_sync,
+            stop_email_sync,
+            force_email_sync,
+            fetch_and_cache_email_body,
+            mark_cached_email_read,
+            purge_email_cache,
+            // Messaging commands (E2EE decentralized)
+            generate_messaging_keypair,
+            get_messaging_identity,
+            create_server,
+            join_server,
+            get_servers,
+            create_channel,
+            get_channels,
+            send_message,
+            get_messages,
+            get_dm_conversations,
+            send_dm,
+            get_dm_messages,
             // Outlook WebView commands (stubs on Android)
             open_outlook_onyx,
             close_outlook_onyx,
             onyx_import_email,
-            outlook_console
+            outlook_console,
+            // Photos commands (E2EE gallery)
+            upload_photo,
+            upload_photos_batch,
+            get_photo_data,
+            get_photos,
+            toggle_photo_favorite,
+            delete_photo,
+            restore_photo,
+            permanently_delete_photo,
+            move_photo_to_album,
+            get_albums,
+            create_album,
+            rename_album,
+            delete_album,
+            set_album_cover,
+            get_photo_stats,
+            empty_photo_trash,
+            export_photo,
+            // Cloud Drive commands (E2EE file manager)
+            cloud_upload_file,
+            cloud_upload_batch,
+            cloud_create_folder,
+            cloud_list_files,
+            cloud_get_breadcrumbs,
+            cloud_get_file_data,
+            cloud_rename_file,
+            cloud_move_file,
+            cloud_toggle_star,
+            cloud_delete_file,
+            cloud_restore_file,
+            cloud_permanently_delete,
+            cloud_search_files,
+            cloud_get_versions,
+            cloud_get_stats,
+            cloud_export_file,
+            cloud_empty_trash
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

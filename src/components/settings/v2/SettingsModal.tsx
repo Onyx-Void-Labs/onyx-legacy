@@ -12,6 +12,8 @@ import FeaturesTab from './tabs/FeaturesTab.tsx';
 import DataTab from './tabs/DataTab.tsx';
 import SecurityTab from './tabs/SecurityTab.tsx';
 import SyncTab from './tabs/SyncTab.tsx';
+import PhotosTab from './tabs/PhotosTab.tsx';
+import CloudTab from './tabs/CloudTab.tsx';
 
 interface SettingsModalProps {
     user: any;
@@ -61,6 +63,8 @@ export default function SettingsModal({ user, onLogout }: SettingsModalProps) {
             {activeTab === 'features' && <FeaturesTab />}
             {activeTab === 'storage' && <DataTab />}
             {activeTab === 'sync' && <SyncTab />}
+            {activeTab === 'photos' && <PhotosTab />}
+            {activeTab === 'cloud' && <CloudTab />}
             {activeTab === 'about' && <AboutTab />}
         </>
     );
