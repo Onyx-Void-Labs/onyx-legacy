@@ -81,10 +81,7 @@ jobs:
             target: aarch64-apple-darwin
             suffix: macos-aarch64
             artifact: onyx-macos-aarch64
-          - os: macos-13
-            target: x86_64-apple-darwin
-            suffix: macos-x64
-            artifact: onyx-macos-x64
+          # macOS x64 dropped — Rosetta 2 runs aarch64 binaries on Intel Macs
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             suffix: windows-x64
