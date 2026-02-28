@@ -1,117 +1,304 @@
+# ─────────────────────────────────────────────────────────────────────
+# Onyx Release — Auto-publish on version tags (v*)
+# ─────────────────────────────────────────────────────────────────────
+# Trigger: git tag v1.0.0 && git push --tags
+# Result:  Signed builds for all 5 platforms → GitHub Release (draft)
+# ─────────────────────────────────────────────────────────────────────
+
 name: Release (Tagged)
 
-# Only runs when you manually push a version tag like v1.0.0
-# For CI draft builds, see ci.yml
 on:
   push:
     tags:
       - 'v[0-9]+.*'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release:
-    permissions:
-      contents: write
+  # ━━━ Frontend build (shared by all platform jobs) ━━━━━━━━━━━━━━━━
+  frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+          retention-days: 1
+
+  # ━━━ Desktop builds (parallel matrix) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  desktop:
+    name: ${{ matrix.name }}
+    needs: frontend
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, macos-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.platform }}
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            name: Linux x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            name: macOS ARM64
+          - os: macos-14
+            target: x86_64-apple-darwin
+            name: macOS x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: Windows x64
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
+          cache: pnpm
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
 
-      - name: Install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
 
-      - name: Install frontend dependencies
-        run: npm install
-
-      - name: Build and Release
+      - name: Build & sign
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         with:
+          tauriScript: pnpm exec tauri
+          args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}
-          releaseName: 'Onyx v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
+          releaseName: 'Onyx ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install.'
           releaseDraft: true
           prerelease: false
 
-  release-android:
-    permissions:
-      contents: write
+  # ━━━ Android build ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  android:
+    name: Android ARM64
+    needs: frontend
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
+          cache: pnpm
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
+      - name: Setup Android SDK + NDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
-        run: sdkmanager "ndk;27.0.12077973"
+      - run: sdkmanager "ndk;27.0.12077973"
+      - run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
 
-      - name: Set NDK_HOME
-        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('src-tauri/gen/android/**/*.gradle*') }}
+          restore-keys: gradle-
 
-      - name: Install frontend dependencies
-        run: npm install
+      - name: Init Tauri Android
+        run: pnpm exec tauri android init
 
-      - name: Decode Android keystore
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > /tmp/onyx-release.keystore
+      - name: Decode keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > src-tauri/gen/android/onyx-release.jks
+          cat > src-tauri/gen/android/keystore.properties << EOF
+          storeFile=onyx-release.jks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      - name: Initialize Tauri Android
-        run: npx tauri android init
+      # gen/ is gitignored → tauri android init generates a default build.gradle.kts
+      # with NO signing config. Inject it before building.
+      - name: Inject Gradle signing config
+        run: |
+          GRADLE_FILE="src-tauri/gen/android/app/build.gradle.kts"
+          if grep -q "keystoreProperties" "$GRADLE_FILE"; then
+            echo "✅ Signing config already present"
+            exit 0
+          fi
+          echo "🔧 Patching generated build.gradle.kts with signing config..."
+          python3 -c "
+          path = 'src-tauri/gen/android/app/build.gradle.kts'
+          with open(path) as f: content = f.read()
+          import textwrap
+          header = textwrap.dedent('''
+          import java.util.Properties
 
-      - name: Build Android APK (release)
-        run: npx tauri android build
+          val keystoreProperties = Properties().apply {
+              for (name in listOf(\"keystore.properties\", \"key.properties\")) {
+                  val f = rootProject.file(name)
+                  if (f.exists()) { f.inputStream().use { load(it) }; println(\"Loaded keystore: \" + f.absolutePath); return@apply }
+              }
+              println(\"WARNING: no keystore.properties found\")
+          }
+
+          ''').lstrip('\n')
+          content = header + content
+          signing = textwrap.dedent('''
+              signingConfigs {
+                  create(\"release\") {
+                      val ksPath = keystoreProperties.getProperty(\"storeFile\")
+                      if (ksPath != null) {
+                          storeFile = rootProject.file(ksPath)
+                          storePassword = keystoreProperties.getProperty(\"storePassword\") ?: \"\"
+                          keyAlias = keystoreProperties.getProperty(\"keyAlias\") ?: \"\"
+                          keyPassword = keystoreProperties.getProperty(\"keyPassword\") ?: \"\"
+                      }
+                  }
+              }
+          ''')
+          content = content.replace('android {', 'android {\n' + signing, 1)
+          content = content.replace(
+              'getByName(\"release\") {',
+              'getByName(\"release\") {\n            signingConfig = signingConfigs.getByName(\"release\")',
+              1
+          )
+          with open(path, 'w') as f: f.write(content)
+          print('✅ Gradle signing config injected')
+          "
+
+      - name: Build APK
+        run: pnpm exec tauri android build --target aarch64
         env:
           VITE_PLATFORM: android
 
-      - name: Sign APK
+      # Manual APK signing (bulletproof — works even if Gradle signing fails)
+      - name: Sign APK (apksigner)
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
-          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
-          $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
-            --ks /tmp/onyx-release.keystore \
-            --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
-            --ks-pass "pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
-            --key-pass "pass:${{ secrets.ANDROID_KEY_PASSWORD }}" \
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -not -name "*debug*" | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ No release APK found!"
+            find src-tauri/gen/android/app/build/outputs/ -type f -name "*.apk" 2>/dev/null || true
+            exit 1
+          fi
+          echo "📦 Found APK: $APK ($(du -h "$APK" | cut -f1))"
+
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools/" | sort -V | tail -1)"
+          echo "🔧 Using build-tools: $BUILD_TOOLS"
+
+          # Zipalign + sign (v1 + v2 + v3)
+          "$BUILD_TOOLS/zipalign" -f -v 4 "$APK" "${APK}.aligned"
+          mv "${APK}.aligned" "$APK"
+          "$BUILD_TOOLS/apksigner" sign \
+            --verbose \
+            --ks src-tauri/gen/android/onyx-release.jks \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass "pass:$ANDROID_KEY_PASSWORD" \
             "$APK"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+
+          if [[ "$APK" == *"unsigned"* ]]; then
+            SIGNED="${APK//-unsigned/}"
+            mv "$APK" "$SIGNED"
+            APK="$SIGNED"
+          fi
+
+          echo "✅ APK signed: $(basename "$APK") ($(du -h "$APK" | cut -f1))"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      # Fail-safe: reject unsigned APKs
+      - name: Verify APK is signed (fail-safe)
+        run: |
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -not -name "*debug*" -not -name "*unsigned*" | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ FATAL: No signed APK found!"
+            find src-tauri/gen/android/app/build/outputs/ -type f 2>/dev/null || true
+            exit 1
+          fi
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools/" | sort -V | tail -1)"
+          "$BUILD_TOOLS/apksigner" verify "$APK" || { echo "❌ APK signature verification FAILED"; exit 1; }
+          echo "✅ Signed APK verified: $(basename "$APK")"
 
       - name: Upload APK to release
         run: |
-          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -not -name '*unsigned*' -not -name '*debug*' | head -1)
           gh release upload "${{ github.ref_name }}" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

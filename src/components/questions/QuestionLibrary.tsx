@@ -4,7 +4,7 @@
  * Gated by useFeature('question_library').
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useDeferredValue } from 'react';
 import {
   HelpCircle,
   Search,
@@ -386,6 +386,7 @@ export default function QuestionLibrary() {
   } = useQuestionStore();
 
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [filterDifficulty, setFilterDifficulty] = useState<QuestionDifficulty | ''>('');
   const [filterStatus, setFilterStatus] = useState<QuestionStatus | ''>('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -397,11 +398,11 @@ export default function QuestionLibrary() {
 
   const filteredQuestions = useMemo(() => {
     return getFilteredQuestions({
-      search: search || undefined,
+      search: deferredSearch || undefined,
       difficulty: filterDifficulty || undefined,
       status: filterStatus || undefined,
     });
-  }, [questions, search, filterDifficulty, filterStatus, getFilteredQuestions]);
+  }, [questions, deferredSearch, filterDifficulty, filterStatus, getFilteredQuestions]);
 
   const handleStartPractice = useCallback(
     (questionIds?: string[]) => {

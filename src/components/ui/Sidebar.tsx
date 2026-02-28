@@ -1,6 +1,6 @@
 
 import { Search, Plus, Trash2, Lock, ChevronRight, CalendarHeart, BookOpen, Pin, PinOff, Archive, ArchiveRestore, HelpCircle, LayoutDashboard } from "lucide-react";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import LockModal from "./LockModal";
 import { useSync } from "../../contexts/SyncContext";
 import { useSettings } from "../../contexts/SettingsContext";
@@ -59,7 +59,7 @@ interface SidebarProps {
     onGoToCanvas?: () => void;    // Navigate to canvas view
 }
 
-export default function Sidebar({
+const Sidebar = React.memo(function Sidebar({
     onSelectNote,
     activeNoteId,
     notes,
@@ -541,4 +541,6 @@ export default function Sidebar({
             </div>
         </aside>
     );
-}
+});
+
+export default Sidebar;

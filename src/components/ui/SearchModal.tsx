@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useDeferredValue } from 'react';
 import { Search, FileText, Plus, Tag } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
 import type { FileMeta } from '../../types/sync';
@@ -19,6 +19,7 @@ export default function SearchModal({ isOpen, onClose, notes, onSelectNote }: Se
     const { createFile, updateFile, files } = useSync();
 
     const [query, setQuery] = useState('');
+    const deferredQuery = useDeferredValue(query);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [activeTag, setActiveTag] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -44,14 +45,14 @@ export default function SearchModal({ isOpen, onClose, notes, onSelectNote }: Se
     }, [files]);
 
     const filtered = notes.filter(n => {
-        const matchesQuery = (n.title || 'Untitled').toLowerCase().includes(query.toLowerCase());
+        const matchesQuery = (n.title || 'Untitled').toLowerCase().includes(deferredQuery.toLowerCase());
         const matchesTag = activeTag ? (noteTagMap.get(n.id) ?? []).includes(activeTag) : true;
         return matchesQuery && matchesTag;
     });
 
     // Add "Create new" option when query exists but no exact match
-    const hasExactMatch = notes.some(n => (n.title || '').toLowerCase() === query.toLowerCase());
-    const showCreateOption = query.trim().length > 0 && !hasExactMatch;
+    const hasExactMatch = notes.some(n => (n.title || '').toLowerCase() === deferredQuery.toLowerCase());
+    const showCreateOption = deferredQuery.trim().length > 0 && !hasExactMatch;
     const totalItems = filtered.length + (showCreateOption ? 1 : 0);
 
     useEffect(() => {

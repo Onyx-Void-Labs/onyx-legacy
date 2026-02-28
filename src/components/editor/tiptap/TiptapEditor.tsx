@@ -463,6 +463,7 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
     const providerRef = useRef<HocuspocusProvider | null>(null);
     const persistenceRef = useRef<IndexeddbPersistence | null>(null);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const saveRafRef = useRef<number | null>(null);
     const titleRef = useRef<HTMLInputElement>(null);
 
     // Create Yjs doc and persistence for the active note
@@ -472,133 +473,92 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
         return doc;
     }, [activeNoteId]);
 
+    // ─── Memoised Tiptap extensions (avoids re-creating on every render) ───
+    const extensions = useMemo(() => [
+        StarterKit.configure({
+            undoRedo: false, // Yjs handles undo/redo
+            codeBlock: false, // Use lowlight version instead
+            dropcursor: false, // Use custom dropcursor
+            link: false, // Use custom link config
+            underline: false, // We use the separate UnderlineExt import
+            heading: { levels: [1, 2, 3, 4, 5, 6] },
+            bold: { HTMLAttributes: {} },
+            italic: { HTMLAttributes: {} },
+        }),
+        Placeholder.configure({
+            placeholder: ({ node }) => {
+                if (node.type.name === 'heading') return `Heading ${node.attrs.level}`;
+                return "Type '/' for commands...";
+            },
+            showOnlyWhenEditable: true,
+            showOnlyCurrent: true,
+        }),
+        // Collaboration via Yjs
+        ...(yDoc ? [Collaboration.configure({ document: yDoc })] : []),
+        // Formatting
+        Highlight.configure({ multicolor: true }),
+        UnderlineExt,
+        SubscriptExt,
+        SuperscriptExt,
+        TextStyle.configure({ mergeNestedSpanStyles: true }),
+        FontFamily,
+        Color,
+        Link.configure({
+            openOnClick: false,
+            linkOnPaste: true,
+            HTMLAttributes: {
+                class: 'text-violet-400 underline decoration-violet-400/30 hover:decoration-violet-400 cursor-pointer',
+            },
+        }),
+        TextAlign.configure({ types: ['heading', 'paragraph'] }),
+        Typography,
+        Dropcursor.configure({ color: '#7c6ef7', width: 2 }),
+        // Lists
+        TaskList.configure({ HTMLAttributes: { class: 'onyx-task-list' } }),
+        TaskItem.configure({ nested: true }),
+        // Code
+        CodeBlockLowlight.configure({ lowlight, HTMLAttributes: { class: 'onyx-code-block' } }),
+        // Tables
+        Table.configure({ resizable: true, HTMLAttributes: { class: 'onyx-table' } }),
+        TableRow,
+        TableHeader,
+        TableCell,
+        // Media
+        ImageExt.configure({ allowBase64: true, inline: false, HTMLAttributes: { class: 'onyx-image' } }),
+        Youtube.configure({ HTMLAttributes: { class: 'onyx-youtube' }, inline: false }),
+        // Custom nodes
+        CalloutNode,
+        MathBlockNode,
+        NoteLink,
+        QueryBlock,
+        // Custom extensions
+        MarkdownShortcuts,
+        // Disable DragHandle on mobile — block dragging is painful on touch
+        ...(IS_ANDROID || IS_IOS ? [] : [DragHandle]),
+        SlashCommands,
+        SearchReplace,
+        // Phase 9 extensions
+        BlockId,
+        RecallMark,
+        SmartMathExtension,
+    ], [yDoc]);
+
     // Tiptap editor instance
     const editor = useEditor(
         {
-            extensions: [
-                StarterKit.configure({
-                    undoRedo: false, // Yjs handles undo/redo
-                    codeBlock: false, // Use lowlight version instead
-                    dropcursor: false, // Use custom dropcursor
-                    link: false, // Use custom link config
-                    underline: false, // We use the separate UnderlineExt import
-                    heading: {
-                        levels: [1, 2, 3, 4, 5, 6],
-                    },
-                    // BUG 7 + 8: Set bold mark with lower priority so it doesn't
-                    // conflict with TextStyle / Color marks, and works inside headings
-                    bold: {
-                        HTMLAttributes: {},
-                    },
-                    italic: {
-                        HTMLAttributes: {},
-                    },
-                }),
-                Placeholder.configure({
-                    placeholder: ({ node }) => {
-                        if (node.type.name === 'heading') {
-                            return `Heading ${node.attrs.level}`;
-                        }
-                        return "Type '/' for commands...";
-                    },
-                    showOnlyWhenEditable: true,
-                    showOnlyCurrent: true,
-                }),
-                // Collaboration via Yjs
-                ...(yDoc
-                    ? [
-                        Collaboration.configure({
-                            document: yDoc,
-                        }),
-                    ]
-                    : []),
-                // Formatting
-                Highlight.configure({ multicolor: true }),
-                UnderlineExt,
-                SubscriptExt,
-                SuperscriptExt,
-                // BUG 8: TextStyle must have lower priority than bold (default 1000)
-                // so bold toggles work even when a color/font is applied
-                TextStyle.configure({
-                    mergeNestedSpanStyles: true,
-                }),
-                FontFamily,
-                Color,
-                Link.configure({
-                    openOnClick: false,
-                    linkOnPaste: true,
-                    HTMLAttributes: {
-                        class: 'text-violet-400 underline decoration-violet-400/30 hover:decoration-violet-400 cursor-pointer',
-                    },
-                }),
-                TextAlign.configure({
-                    types: ['heading', 'paragraph'],
-                }),
-                Typography,
-                Dropcursor.configure({
-                    color: '#7c6ef7',
-                    width: 2,
-                }),
-                // Lists
-                TaskList.configure({
-                    HTMLAttributes: {
-                        class: 'onyx-task-list',
-                    },
-                }),
-                TaskItem.configure({
-                    nested: true,
-                }),
-                // Code
-                CodeBlockLowlight.configure({
-                    lowlight,
-                    HTMLAttributes: {
-                        class: 'onyx-code-block',
-                    },
-                }),
-                // Tables
-                Table.configure({
-                    resizable: true,
-                    HTMLAttributes: {
-                        class: 'onyx-table',
-                    },
-                }),
-                TableRow,
-                TableHeader,
-                TableCell,
-                // Media
-                ImageExt.configure({
-                    allowBase64: true,
-                    inline: false,
-                    HTMLAttributes: {
-                        class: 'onyx-image',
-                    },
-                }),
-                Youtube.configure({
-                    HTMLAttributes: {
-                        class: 'onyx-youtube',
-                    },
-                    inline: false,
-                }),
-                // Custom nodes
-                CalloutNode,
-                MathBlockNode,
-                NoteLink,
-                QueryBlock,
-                // Custom extensions
-                MarkdownShortcuts,
-                // Disable DragHandle on mobile — block dragging is painful on touch
-                ...(IS_ANDROID || IS_IOS ? [] : [DragHandle]),
-                SlashCommands,
-                SearchReplace,
-                // Phase 9 extensions
-                BlockId,
-                RecallMark,
-                SmartMathExtension,
-            ],
+            extensions,
             editorProps: {
                 attributes: {
                     class: 'onyx-tiptap-content outline-none',
                     spellcheck: settings.spellcheck ? 'true' : 'false',
+                },
+                // ─── 60-120FPS: batch DOM reads/writes behind rAF ───
+                handleScrollToSelection: (view) => {
+                    requestAnimationFrame(() => {
+                        const { node } = view.domAtPos(view.state.selection.from);
+                        (node as Element)?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+                    });
+                    return true;
                 },
             },
             // Autofocus at end
@@ -749,17 +709,22 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             }
         });
 
-        // Debounced save to Rust E2EE
+        // Debounced save to Rust E2EE — 1.5s debounce + rAF coalescing
+        // Reduces IPC chatter during rapid typing (60→120FPS friendly)
         const saveObserver = () => {
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-            saveTimerRef.current = setTimeout(async () => {
-                try {
-                    const json = serialiseTiptapDoc(yDoc);
-                    await invoke('save_note', { id: activeNoteId, content: json });
-                } catch {
-                    // Rust not available
-                }
-            }, 500);
+            saveTimerRef.current = setTimeout(() => {
+                // Coalesce with rAF to avoid save during active rendering
+                if (saveRafRef.current) cancelAnimationFrame(saveRafRef.current);
+                saveRafRef.current = requestAnimationFrame(async () => {
+                    try {
+                        const json = serialiseTiptapDoc(yDoc);
+                        await invoke('save_note', { id: activeNoteId, content: json });
+                    } catch {
+                        // Rust not available
+                    }
+                });
+            }, 1500);
         };
 
         yDoc.on('update', saveObserver);
@@ -768,6 +733,7 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             console.log('[TiptapEditor] Cleaning up for note:', activeNoteId);
             yDoc.off('update', saveObserver);
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+            if (saveRafRef.current) cancelAnimationFrame(saveRafRef.current);
             if (providerRef.current) {
                 providerRef.current.destroy();
                 providerRef.current = null;
@@ -915,6 +881,7 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             {/* Editor Content */}
             <div
                 className="flex-1 overflow-auto focus:outline-none scroll-smooth pb-32"
+                style={{ willChange: 'scroll-position', contain: 'strict' }}
                 onContextMenu={(e) => {
                     const target = e.target as HTMLElement;
                     if (target.closest('td') || target.closest('th')) {

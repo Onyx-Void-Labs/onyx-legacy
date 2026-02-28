@@ -3,7 +3,7 @@ import {
     Lock, Check, Type, Wifi, CreditCard, Terminal, Hash, FileText, Settings2, ShieldAlert,
     Dices
 } from 'lucide-react';
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { useVault } from '../../contexts/VaultContext';
 import { PasswordPayload, VaultItemType, VaultCustomField } from '../../services/PasswordService';
 import { v4 as uuidv4 } from 'uuid';
@@ -81,6 +81,7 @@ export default function PasswordsView({ sidebarCollapsed = false }: PasswordsVie
     // List State
     const [filter, setFilter] = useState<VaultFilter>('all');
     const [searchQuery, setSearchQuery] = useState('');
+    const deferredSearchQuery = useDeferredValue(searchQuery);
     const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
 
     // Editor State
@@ -117,8 +118,8 @@ export default function PasswordsView({ sidebarCollapsed = false }: PasswordsVie
             result = [...result].sort((a, b) => b.lastUsed - a.lastUsed).slice(0, 10);
         }
 
-        if (searchQuery) {
-            const q = searchQuery.toLowerCase();
+        if (deferredSearchQuery) {
+            const q = deferredSearchQuery.toLowerCase();
             result = result.filter(entry =>
                 entry.name.toLowerCase().includes(q) ||
                 (entry.username && entry.username.toLowerCase().includes(q)) ||
@@ -126,7 +127,7 @@ export default function PasswordsView({ sidebarCollapsed = false }: PasswordsVie
             );
         }
         return result;
-    }, [passwords, filter, searchQuery]);
+    }, [passwords, filter, deferredSearchQuery]);
 
     const selectedEntry = passwords.find(p => p.id === selectedEntryId) || null;
 

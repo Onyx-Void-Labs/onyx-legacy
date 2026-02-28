@@ -37,11 +37,11 @@ url = "2"
 regex-lite = "0.1"
 
 [profile.release]
-opt-level = "s"
-lto = true
-codegen-units = 1
-strip = "debuginfo"
-panic = "abort"
+opt-level = "s"          # Optimize for size (ideal for mobile APK)
+lto = "fat"              # Full cross-crate LTO — max dead-code elimination
+codegen-units = 1        # Single codegen unit — best optimisation, slower compile
+strip = true             # Strip ALL symbols (debug + symbol table) — saves ~2-4MB
+panic = "abort"          # No unwind tables — smaller binary
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 trash = "5"

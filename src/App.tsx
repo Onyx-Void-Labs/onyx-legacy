@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 
 
 import Sidebar from "@/components/ui/Sidebar";
@@ -35,16 +35,26 @@ import { usePlatform } from "@/hooks/usePlatform";
 import MobileShell from "@/components/layout/MobileShell";
 import BottomSheet from "@/components/layout/BottomSheet";
 
-// Module Views
-import MessagesView from "@/components/messages/MessagesView";
-import CalendarView from "@/components/calendar/CalendarView";
-import EmailView from "@/components/email/EmailView";
-import PhotosView from "@/components/photos/PhotosView";
-import PasswordsView from "@/components/passwords/PasswordsView";
-import CloudView from "@/components/cloud/CloudView";
-import QuestionLibrary from "@/components/questions/QuestionLibrary";
-import CanvasView from "@/components/canvas/CanvasView";
+// ─── Lazy-loaded module views (only loaded when workspace switches) ──
+const MessagesView = lazy(() => import("@/components/messages/MessagesView"));
+const CalendarView = lazy(() => import("@/components/calendar/CalendarView"));
+const EmailView = lazy(() => import("@/components/email/EmailView"));
+const PhotosView = lazy(() => import("@/components/photos/PhotosView"));
+const PasswordsView = lazy(() => import("@/components/passwords/PasswordsView"));
+const CloudView = lazy(() => import("@/components/cloud/CloudView"));
+const QuestionLibrary = lazy(() => import("@/components/questions/QuestionLibrary"));
+const CanvasView = lazy(() => import("@/components/canvas/CanvasView"));
+
 import { useCanvasStore } from "@/store/canvasStore";
+
+// ─── Shared lazy-load spinner ──
+function ModuleLoader() {
+  return (
+    <div className="flex-1 flex items-center justify-center" style={{ background: 'var(--onyx-bg)' }}>
+      <div className="animate-pulse text-zinc-500 text-sm">Loading...</div>
+    </div>
+  );
+}
 
 const TODAY_SENTINEL = '__today__';
 const FLASHCARD_SENTINEL = '__flashcards__';
@@ -199,39 +209,37 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [tabs, activeTabId]);
 
-  const openTab = (id: string, forceNew: boolean = false) => {
-    if (tabs.includes(id)) {
-      setActiveTabId(id);
-      return;
-    }
-    if (forceNew || tabs.length === 0 || activeTabId === null) {
-      setTabs([...tabs, id]);
-      setActiveTabId(id);
-    } else {
-      if (activeTabId !== null) {
-        const newTabs = tabs.map(t => t === activeTabId ? id : t);
-        setTabs(newTabs);
+  const openTab = useCallback((id: string, forceNew: boolean = false) => {
+    setTabs(prev => {
+      if (prev.includes(id)) {
         setActiveTabId(id);
-      } else {
-        setTabs([id]);
-        setActiveTabId(id);
+        return prev;
       }
-    }
-  };
+      if (forceNew || prev.length === 0) {
+        setActiveTabId(id);
+        return [...prev, id];
+      }
+      setActiveTabId(id);
+      return prev.map(t => t === activeTabId ? id : t);
+    });
+    setActiveTabId(id);
+  }, [activeTabId]);
 
-  const closeTab = (id: string) => {
-    const currentIndex = tabs.indexOf(id);
-    const newTabs = tabs.filter((t) => t !== id);
-    setTabs(newTabs);
-    if (activeTabId === id && newTabs.length > 0) {
-      const nextIndex = Math.min(currentIndex, newTabs.length - 1);
-      setActiveTabId(newTabs[nextIndex]);
-    } else if (newTabs.length === 0) {
-      setActiveTabId(null);
-    }
-  };
+  const closeTab = useCallback((id: string) => {
+    setTabs(prev => {
+      const currentIndex = prev.indexOf(id);
+      const newTabs = prev.filter((t) => t !== id);
+      if (activeTabId === id && newTabs.length > 0) {
+        const nextIndex = Math.min(currentIndex, newTabs.length - 1);
+        setActiveTabId(newTabs[nextIndex]);
+      } else if (newTabs.length === 0) {
+        setActiveTabId(null);
+      }
+      return newTabs;
+    });
+  }, [activeTabId]);
 
-  const handleDeleteNote = async (id: string) => {
+  const handleDeleteNote = useCallback(async (id: string) => {
     try {
       deleteFile(id);
 
@@ -264,18 +272,20 @@ function AppContent() {
     } catch (e) {
       console.error("Delete failed", e);
     }
-  };
+  }, [deleteFile, settings.mirrorEnabled, settings.mirrorPath, settings.mirrorDeleteToBin, closeTab]);
 
-  const handleSearchSelect = (id: string) => {
+  const handleSearchSelect = useCallback((id: string) => {
     openTab(id, true);
-  };
+  }, [openTab]);
 
-  const reorderTabs = (fromIndex: number, toIndex: number) => {
-    const reorderedTabs = [...tabs];
-    const [moved] = reorderedTabs.splice(fromIndex, 1);
-    reorderedTabs.splice(toIndex, 0, moved);
-    setTabs(reorderedTabs);
-  };
+  const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
+    setTabs(prev => {
+      const reorderedTabs = [...prev];
+      const [moved] = reorderedTabs.splice(fromIndex, 1);
+      reorderedTabs.splice(toIndex, 0, moved);
+      return reorderedTabs;
+    });
+  }, []);
 
   const handleLockNote = async (_id: string, _password: string) => {
     console.warn("Locking not yet implemented for Pure Yjs");
@@ -421,13 +431,17 @@ function AppContent() {
                     <TrashView onOpenNote={(id) => openTab(id, true)} />
                   </ErrorBoundary>
                 ) : isQuestions ? (
-                  <ErrorBoundary fallbackTitle="Question Library crashed">
-                    <QuestionLibrary />
-                  </ErrorBoundary>
+                  <Suspense fallback={<ModuleLoader />}>
+                    <ErrorBoundary fallbackTitle="Question Library crashed">
+                      <QuestionLibrary />
+                    </ErrorBoundary>
+                  </Suspense>
                 ) : isCanvas && canvasId ? (
-                  <ErrorBoundary fallbackTitle="Canvas crashed">
-                    <CanvasView canvasId={canvasId} />
-                  </ErrorBoundary>
+                  <Suspense fallback={<ModuleLoader />}>
+                    <ErrorBoundary fallbackTitle="Canvas crashed">
+                      <CanvasView canvasId={canvasId} />
+                    </ErrorBoundary>
+                  </Suspense>
                 ) : isCollection && collectionType ? (
                   <ErrorBoundary fallbackTitle="Collection view crashed">
                     <CollectionView
@@ -470,17 +484,17 @@ function AppContent() {
           </div>
         );
       case 'messages':
-        return <ErrorBoundary fallbackTitle="Messages crashed"><MessagesView /></ErrorBoundary>;
+        return <Suspense fallback={<ModuleLoader />}><ErrorBoundary fallbackTitle="Messages crashed"><MessagesView /></ErrorBoundary></Suspense>;
       case 'calendar':
-        return <ErrorBoundary fallbackTitle="Calendar crashed"><CalendarView /></ErrorBoundary>;
+        return <Suspense fallback={<ModuleLoader />}><ErrorBoundary fallbackTitle="Calendar crashed"><CalendarView /></ErrorBoundary></Suspense>;
       case 'email':
-        return <ErrorBoundary fallbackTitle="Email crashed"><EmailView /></ErrorBoundary>;
+        return <Suspense fallback={<ModuleLoader />}><ErrorBoundary fallbackTitle="Email crashed"><EmailView /></ErrorBoundary></Suspense>;
       case 'photos':
-        return <ErrorBoundary fallbackTitle="Photos crashed"><PhotosView /></ErrorBoundary>;
+        return <Suspense fallback={<ModuleLoader />}><ErrorBoundary fallbackTitle="Photos crashed"><PhotosView /></ErrorBoundary></Suspense>;
       case 'passwords':
-        return <ErrorBoundary fallbackTitle="Passwords crashed"><PasswordsView /></ErrorBoundary>;
+        return <Suspense fallback={<ModuleLoader />}><ErrorBoundary fallbackTitle="Passwords crashed"><PasswordsView /></ErrorBoundary></Suspense>;
       case 'cloud':
-        return <ErrorBoundary fallbackTitle="Cloud crashed"><CloudView /></ErrorBoundary>;
+        return <Suspense fallback={<ModuleLoader />}><ErrorBoundary fallbackTitle="Cloud crashed"><CloudView /></ErrorBoundary></Suspense>;
       default:
         return null;
     }
