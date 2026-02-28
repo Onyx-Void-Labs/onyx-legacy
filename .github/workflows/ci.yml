@@ -137,60 +137,34 @@ jobs:
         run: npx tauri android init
 
       - name: Decode Android keystore
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > onyx-release.jks
-          ls -la onyx-release.jks
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > src-tauri/gen/android/onyx-release.jks
+          cat > src-tauri/gen/android/keystore.properties << EOF
+          storeFile=onyx-release.jks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+          echo "Keystore and keystore.properties written"
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Build Android APK (release)
         run: npx tauri android build --target aarch64
         env:
           VITE_PLATFORM: android
 
-      - name: Sign APK
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: |
-          # Find the built APK
-          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
-          if [ -z "$APK" ]; then
-            echo "::error::No APK found!"
-            exit 1
-          fi
-          echo "Found APK: $APK"
-
-          # Find build-tools version
-          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
-          echo "Using build-tools: $BUILD_TOOLS"
-
-          # zipalign
-          "${BUILD_TOOLS}zipalign" -f -v 4 "$APK" "${APK}.aligned"
-          mv "${APK}.aligned" "$APK"
-
-          # Sign with apksigner
-          "${BUILD_TOOLS}apksigner" sign \
-            --ks onyx-release.jks \
-            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
-            --ks-key-alias "$ANDROID_KEY_ALIAS" \
-            --key-pass "pass:$ANDROID_KEY_PASSWORD" \
-            "$APK"
-
-          # Verify
-          "${BUILD_TOOLS}apksigner" verify --verbose "$APK"
-          echo "APK signed and verified successfully!"
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: onyx-android-release
+          name: onyx-android-release-signed
           path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-          retention-days: 7
+            src-tauri/gen/android/app/build/outputs/apk/**/release/app-*.apk
+          retention-days: 30
 
   release:
     name: Release
