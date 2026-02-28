@@ -15,11 +15,11 @@ name = "onyx_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = "2"
 
 [dependencies]
-tauri = { version = "2", features = ["unstable"] }
-tauri-plugin-opener = "2"
+tauri = { version = "2.10.2", features = ["unstable"] }
+tauri-plugin-opener = "2"  # stays on latest 2.x
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
