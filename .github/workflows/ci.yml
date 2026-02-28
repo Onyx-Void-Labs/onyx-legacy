@@ -289,7 +289,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: src-tauri/target/release/bundle/**
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/**
           retention-days: 30
 
       - name: Upload Android APK
