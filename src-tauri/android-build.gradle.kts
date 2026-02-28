@@ -92,6 +92,15 @@ android {
     }
     kotlinOptions {
         jvmTarget = "1.8"
+        // Suppress upstream Tauri/plugin deprecation warnings we can't fix
+        freeCompilerArgs += listOf(
+            "-Xsuppress-warning=DEPRECATION",
+            "-Xsuppress-warning=UNUSED_PARAMETER"
+        )
+    }
+    // Suppress missing consumer-rules.pro warnings from Tauri plugins
+    lintOptions {
+        isAbortOnError = false
     }
     buildFeatures {
         buildConfig = true

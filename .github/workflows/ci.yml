@@ -81,7 +81,7 @@ jobs:
             target: aarch64-apple-darwin
             suffix: macos-aarch64
             artifact: onyx-macos-aarch64
-          - os: macos-14
+          - os: macos-13
             target: x86_64-apple-darwin
             suffix: macos-x64
             artifact: onyx-macos-x64
