@@ -43,6 +43,7 @@
     "core:window:allow-toggle-maximize",
     "fs:default",
     "fs:allow-write-text-file",
+    "fs:allow-write-file",
     "fs:allow-mkdir",
     "fs:allow-exists",
     "fs:allow-read-text-file",
@@ -54,6 +55,8 @@
       "allow": [
         "$HOME/**",
         "$DOCUMENT/**",
+        "$DOWNLOAD/**",
+        "$DESKTOP/**",
         "$APPDATA/**"
       ]
     },

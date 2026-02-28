@@ -11,10 +11,11 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use lettre::message::header::ContentType;
-use lettre::message::Mailbox;
+use lettre::message::{Mailbox, MultiPart, SinglePart, Attachment};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
+use mailparse::parse_mail;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -528,6 +529,7 @@ pub async fn exchange_oauth_code(
     redirect_uri: String,
     client_id: String,
     code_verifier: Option<String>,
+    client_secret: Option<String>,
 ) -> Result<OAuthTokenResponse, String> {
     let token_url = match provider.as_str() {
         "google" | "gmail" => "https://oauth2.googleapis.com/token",
@@ -546,6 +548,10 @@ pub async fn exchange_oauth_code(
 
     if let Some(verifier) = code_verifier {
         params.push(("code_verifier", verifier));
+    }
+
+    if let Some(secret) = client_secret {
+        params.push(("client_secret", secret));
     }
 
     let client = reqwest::Client::new();
@@ -656,12 +662,11 @@ fn fetch_headers_sync(
     let mut session = match auth_method {
         "oauth2" => {
             let token = access_token.ok_or("No access token for OAuth2")?;
-            // Build XOAUTH2 SASL string: base64("user=<email>\x01auth=Bearer <token>\x01\x01")
+            // Build XOAUTH2 SASL string (raw — imap crate base64-encodes internally)
             let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, token);
-            let auth_b64 = general_purpose::STANDARD.encode(auth_string.as_bytes());
 
             client
-                .authenticate("XOAUTH2", &XOAuth2Authenticator { response: auth_b64 })
+                .authenticate("XOAUTH2", &XOAuth2Authenticator { response: auth_string })
                 .map_err(|(e, _)| format!("XOAUTH2 auth failed: {}", e))?
         }
         _ => {
@@ -731,10 +736,11 @@ fn fetch_headers_sync(
                     let name = a.name.as_ref().map(|n| decode_mime_header(n)).unwrap_or_default();
                     let mailbox = a.mailbox.as_ref().map(|m| String::from_utf8_lossy(m).to_string()).unwrap_or_default();
                     let host = a.host.as_ref().map(|h| String::from_utf8_lossy(h).to_string()).unwrap_or_default();
+                    let email_addr = format!("{}@{}", mailbox, host);
                     if name.is_empty() {
-                        format!("{}@{}", mailbox, host)
+                        email_addr
                     } else {
-                        name
+                        format!("{} <{}>", name, email_addr)
                     }
                 })
                 .unwrap_or_default();
@@ -768,8 +774,39 @@ fn fetch_headers_sync(
                 .map(|r| String::from_utf8_lossy(r).to_string());
         }
 
-        // Check for attachments — detection deferred to body fetch in imap 3.x alpha
-        let has_attachments = false;
+        // Check for attachments from BODYSTRUCTURE
+        let has_attachments = msg.bodystructure()
+            .map(|bs| {
+                fn check_attachment(bs: &imap_proto::types::BodyStructure) -> bool {
+                    match bs {
+                        imap_proto::types::BodyStructure::Multipart { bodies, .. } => {
+                            bodies.iter().any(|b| check_attachment(b))
+                        }
+                        imap_proto::types::BodyStructure::Basic { other: _, common, .. }
+                        | imap_proto::types::BodyStructure::Text { common, .. }
+                        | imap_proto::types::BodyStructure::Message { common, .. } => {
+                            // Check Content-Disposition: attachment
+                            if let Some(ref disp) = common.disposition {
+                                if disp.ty.eq_ignore_ascii_case("attachment") {
+                                    return true;
+                                }
+                            }
+                            // Check if MIME type suggests attachment (not text/html, not text/plain)
+                            let mime = common.ty.ty.to_lowercase();
+                            let subtype = common.ty.subtype.to_lowercase();
+                            if mime == "application" || mime == "image" || mime == "audio" || mime == "video" {
+                                return true;
+                            }
+                            if mime == "text" && subtype != "plain" && subtype != "html" {
+                                return true;
+                            }
+                            false
+                        }
+                    }
+                }
+                check_attachment(bs)
+            })
+            .unwrap_or(false);
 
         // Preview from text part (first 100 chars)
         let preview = String::new(); // Lazy-loaded on body fetch
@@ -843,9 +880,8 @@ fn fetch_body_sync(
         "oauth2" => {
             let token = access_token.ok_or("No access token for OAuth2")?;
             let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, token);
-            let auth_b64 = general_purpose::STANDARD.encode(auth_string.as_bytes());
             client
-                .authenticate("XOAUTH2", &XOAuth2Authenticator { response: auth_b64 })
+                .authenticate("XOAUTH2", &XOAuth2Authenticator { response: auth_string })
                 .map_err(|(e, _)| format!("XOAUTH2 auth failed: {}", e))?
         }
         _ => {
@@ -872,10 +908,8 @@ fn fetch_body_sync(
 
     let body_bytes = msg.body().unwrap_or_default();
 
-    // Parse the raw email using a simple approach
-    let raw = String::from_utf8_lossy(body_bytes).to_string();
-
-    let (html, text) = parse_email_body(&raw);
+    // Parse with mailparse for proper MIME handling (nested multipart, attachments, charset)
+    let (html, text, attachments) = parse_email_parts(body_bytes);
 
     // Mark as read
     let _ = session.uid_store(&uid_str, "+FLAGS (\\Seen)");
@@ -886,94 +920,114 @@ fn fetch_body_sync(
         uid,
         html,
         text,
-        attachments: vec![], // Attachment parsing deferred for performance
+        attachments,
     })
 }
 
-fn parse_email_body(raw: &str) -> (Option<String>, Option<String>) {
-    // Find boundary for multipart messages
+// ─── MIME Parser (mailparse) ──────────────────────────────────────────────────
+
+fn parse_email_parts(raw: &[u8]) -> (Option<String>, Option<String>, Vec<EmailAttachment>) {
     let mut html_body = None;
     let mut text_body = None;
+    let mut attachments = Vec::new();
 
-    if let Some(boundary_start) = raw.find("boundary=") {
-        let boundary_value = &raw[boundary_start + 9..];
-        let boundary = if boundary_value.starts_with('"') {
-            // Quoted boundary
-            boundary_value[1..]
-                .split('"')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        } else {
-            boundary_value
-                .split(|c: char| c.is_whitespace() || c == ';')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        };
-
-        if !boundary.is_empty() {
-            let delimiter = format!("--{}", boundary);
-            let parts: Vec<&str> = raw.split(&delimiter).collect();
-
-            for part in parts.iter().skip(1) {
-                let lower = part.to_lowercase();
-                if lower.contains("content-type: text/html") {
-                    if let Some(body_start) = part.find("\r\n\r\n").or_else(|| part.find("\n\n")) {
-                        let offset = if part[body_start..].starts_with("\r\n\r\n") { 4 } else { 2 };
-                        let body = &part[body_start + offset..];
-                        // Remove trailing boundary marker
-                        let cleaned = body.trim_end_matches("--").trim();
-                        if lower.contains("content-transfer-encoding: base64") {
-                            html_body = Some(
-                                String::from_utf8(
-                                    general_purpose::STANDARD
-                                        .decode(cleaned.replace(['\r', '\n'], "").as_bytes())
-                                        .unwrap_or_default(),
-                                )
-                                .unwrap_or_default(),
-                            );
-                        } else {
-                            html_body = Some(cleaned.to_string());
-                        }
-                    }
-                } else if lower.contains("content-type: text/plain") {
-                    if let Some(body_start) = part.find("\r\n\r\n").or_else(|| part.find("\n\n")) {
-                        let offset = if part[body_start..].starts_with("\r\n\r\n") { 4 } else { 2 };
-                        let body = &part[body_start + offset..];
-                        let cleaned = body.trim_end_matches("--").trim();
-                        if lower.contains("content-transfer-encoding: base64") {
-                            text_body = Some(
-                                String::from_utf8(
-                                    general_purpose::STANDARD
-                                        .decode(cleaned.replace(['\r', '\n'], "").as_bytes())
-                                        .unwrap_or_default(),
-                                )
-                                .unwrap_or_default(),
-                            );
-                        } else {
-                            text_body = Some(cleaned.to_string());
-                        }
-                    }
+    match parse_mail(raw) {
+        Ok(parsed) => {
+            extract_mime_parts(&parsed, &mut html_body, &mut text_body, &mut attachments);
+        }
+        Err(e) => {
+            eprintln!("[Email] mailparse error: {}", e);
+            // Fallback: treat as plain text
+            let raw_str = String::from_utf8_lossy(raw);
+            if let Some(body_start) = raw_str.find("\r\n\r\n").or_else(|| raw_str.find("\n\n")) {
+                let offset = if raw_str[body_start..].starts_with("\r\n\r\n") { 4 } else { 2 };
+                let body = raw_str[body_start + offset..].to_string();
+                if raw_str.to_lowercase().contains("content-type: text/html") {
+                    html_body = Some(body);
+                } else {
+                    text_body = Some(body);
                 }
             }
         }
     }
 
-    // Single-part message fallback
-    if html_body.is_none() && text_body.is_none() {
-        if let Some(body_start) = raw.find("\r\n\r\n").or_else(|| raw.find("\n\n")) {
-            let offset = if raw[body_start..].starts_with("\r\n\r\n") { 4 } else { 2 };
-            let body = &raw[body_start + offset..];
-            if raw.to_lowercase().contains("content-type: text/html") {
-                html_body = Some(body.to_string());
-            } else {
-                text_body = Some(body.to_string());
+    (html_body, text_body, attachments)
+}
+
+fn extract_mime_parts(
+    mail: &mailparse::ParsedMail,
+    html: &mut Option<String>,
+    text: &mut Option<String>,
+    attachments: &mut Vec<EmailAttachment>,
+) {
+    let content_type = mail.ctype.mimetype.to_lowercase();
+
+    // Check Content-Disposition for attachment detection
+    let disposition = mail
+        .headers
+        .iter()
+        .find(|h| h.get_key().eq_ignore_ascii_case("content-disposition"))
+        .map(|h| h.get_value())
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let is_attachment = disposition.starts_with("attachment")
+        || (disposition.starts_with("inline")
+            && !content_type.starts_with("text/")
+            && !content_type.starts_with("multipart/"));
+
+    if !mail.subparts.is_empty() {
+        // Multipart — recurse into sub-parts
+        for subpart in &mail.subparts {
+            extract_mime_parts(subpart, html, text, attachments);
+        }
+    } else if is_attachment
+        || (!content_type.starts_with("text/") && !content_type.starts_with("multipart/"))
+    {
+        // Attachment (binary part or explicit attachment disposition)
+        if let Ok(body) = mail.get_body_raw() {
+            if body.is_empty() {
+                return;
             }
+            let filename = mail
+                .ctype
+                .params
+                .get("name")
+                .cloned()
+                .or_else(|| {
+                    // Try Content-Disposition filename parameter
+                    disposition.split(';').find_map(|p: &str| {
+                        let p = p.trim();
+                        if p.starts_with("filename=") {
+                            Some(
+                                p[9..]
+                                    .trim_matches('"')
+                                    .trim_matches('\'')
+                                    .to_string(),
+                            )
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or_else(|| "attachment".to_string());
+
+            attachments.push(EmailAttachment {
+                filename,
+                mime_type: content_type,
+                size: body.len(),
+                data: general_purpose::STANDARD.encode(&body),
+            });
+        }
+    } else if content_type == "text/html" && html.is_none() {
+        if let Ok(body) = mail.get_body() {
+            *html = Some(body);
+        }
+    } else if content_type == "text/plain" && text.is_none() {
+        if let Ok(body) = mail.get_body() {
+            *text = Some(body);
         }
     }
-
-    (html_body, text_body)
 }
 
 // ─── SMTP Send ────────────────────────────────────────────────────────────────
@@ -994,6 +1048,7 @@ pub async fn send_email(
     body_text: String,
     in_reply_to: Option<String>,
     references_header: Option<String>,
+    attachments: Option<Vec<EmailAttachmentInput>>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         send_email_sync(
@@ -1011,10 +1066,18 @@ pub async fn send_email(
             &body_text,
             in_reply_to.as_deref(),
             references_header.as_deref(),
+            &attachments.unwrap_or_default(),
         )
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))?
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAttachmentInput {
+    pub filename: String,
+    pub mime_type: String,
+    pub data_base64: String,
 }
 
 fn send_email_sync(
@@ -1032,6 +1095,7 @@ fn send_email_sync(
     _body_text: &str,
     in_reply_to: Option<&str>,
     references_header: Option<&str>,
+    attachments: &[EmailAttachmentInput],
 ) -> Result<(), String> {
     let from_mailbox: Mailbox = format!("{} <{}>", from_name, from_email)
         .parse()
@@ -1063,10 +1127,35 @@ fn send_email_sync(
         builder = builder.references(refs.to_string());
     }
 
-    let email = builder
-        .header(ContentType::TEXT_HTML)
-        .body(body_html.to_string())
-        .map_err(|e| format!("Failed to build email: {}", e))?;
+    // Build email body — multipart if attachments present, simple otherwise
+    let email = if attachments.is_empty() {
+        builder
+            .header(ContentType::TEXT_HTML)
+            .body(body_html.to_string())
+            .map_err(|e| format!("Failed to build email: {}", e))?
+    } else {
+        // Build HTML body part
+        let html_part = SinglePart::builder()
+            .header(ContentType::TEXT_HTML)
+            .body(body_html.to_string());
+
+        let mut multipart = MultiPart::mixed().singlepart(html_part);
+
+        // Add each attachment
+        for att in attachments {
+            let file_data = general_purpose::STANDARD
+                .decode(&att.data_base64)
+                .map_err(|e| format!("Failed to decode attachment '{}': {}", att.filename, e))?;
+            let content_type: ContentType = att.mime_type.parse().unwrap_or(ContentType::TEXT_PLAIN);
+            let attachment_part = Attachment::new(att.filename.clone())
+                .body(file_data, content_type);
+            multipart = multipart.singlepart(attachment_part);
+        }
+
+        builder
+            .multipart(multipart)
+            .map_err(|e| format!("Failed to build multipart email: {}", e))?
+    };
 
     // Build SMTP transport
     let tls_params = TlsParameters::builder(host.to_string())
@@ -1081,12 +1170,10 @@ fn send_email_sync(
     match auth_method {
         "oauth2" => {
             let token = access_token.ok_or("No access token for OAuth2 SMTP")?;
-            // XOAUTH2 via lettre requires using a custom mechanism
-            // We encode the XOAUTH2 string as the password per RFC
-            let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", from_email, token);
-            let auth_b64 = general_purpose::STANDARD.encode(auth_string.as_bytes());
+            // lettre's Xoauth2 mechanism builds the SASL string internally.
+            // Pass the raw OAuth2 access token as the password.
             transport_builder = transport_builder
-                .credentials(Credentials::new(from_email.to_string(), auth_b64))
+                .credentials(Credentials::new(from_email.to_string(), token.to_string()))
                 .authentication(vec![Mechanism::Xoauth2]);
         }
         _ => {
@@ -1146,9 +1233,8 @@ fn list_folders_sync(
         "oauth2" => {
             let token = access_token.ok_or("No access token")?;
             let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, token);
-            let auth_b64 = general_purpose::STANDARD.encode(auth_string.as_bytes());
             client
-                .authenticate("XOAUTH2", &XOAuth2Authenticator { response: auth_b64 })
+                .authenticate("XOAUTH2", &XOAuth2Authenticator { response: auth_string })
                 .map_err(|(e, _)| format!("Auth failed: {}", e))?
         }
         _ => {
@@ -1167,6 +1253,566 @@ fn list_folders_sync(
 
     session.logout().ok();
     Ok(folder_names)
+}
+
+// ─── Move Email (IMAP COPY + Delete) ──────────────────────────────────────────
+
+#[command]
+pub async fn move_email(
+    imap_host: String,
+    imap_port: u16,
+    email: String,
+    auth_method: String,
+    access_token: Option<String>,
+    password: Option<String>,
+    folder: String,
+    uid: u32,
+    target_folder: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        move_email_sync(
+            &imap_host, imap_port, &email, &auth_method,
+            access_token.as_deref(), password.as_deref(),
+            &folder, uid, &target_folder,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+fn move_email_sync(
+    host: &str, port: u16, email: &str, auth_method: &str,
+    access_token: Option<&str>, password: Option<&str>,
+    folder: &str, uid: u32, target_folder: &str,
+) -> Result<(), String> {
+    let client = imap::ClientBuilder::new(host, port)
+        .connect()
+        .map_err(|e| format!("IMAP connect failed: {}", e))?;
+
+    let mut session = imap_authenticate(client, email, auth_method, access_token, password)?;
+
+    session.select(folder).map_err(|e| format!("Folder select failed: {}", e))?;
+
+    let uid_str = uid.to_string();
+
+    // COPY to target folder, then mark deleted + expunge
+    session.uid_copy(&uid_str, target_folder)
+        .map_err(|e| format!("IMAP COPY failed: {}", e))?;
+
+    session.uid_store(&uid_str, "+FLAGS (\\Deleted)")
+        .map_err(|e| format!("IMAP store failed: {}", e))?;
+
+    session.expunge().map_err(|e| format!("IMAP expunge failed: {}", e))?;
+
+    session.logout().ok();
+    Ok(())
+}
+
+// ─── Delete Email ─────────────────────────────────────────────────────────────
+
+#[command]
+pub async fn delete_email(
+    imap_host: String,
+    imap_port: u16,
+    email: String,
+    auth_method: String,
+    access_token: Option<String>,
+    password: Option<String>,
+    folder: String,
+    uid: u32,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        delete_email_sync(
+            &imap_host, imap_port, &email, &auth_method,
+            access_token.as_deref(), password.as_deref(),
+            &folder, uid,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+fn delete_email_sync(
+    host: &str, port: u16, email: &str, auth_method: &str,
+    access_token: Option<&str>, password: Option<&str>,
+    folder: &str, uid: u32,
+) -> Result<(), String> {
+    let client = imap::ClientBuilder::new(host, port)
+        .connect()
+        .map_err(|e| format!("IMAP connect failed: {}", e))?;
+
+    let mut session = imap_authenticate(client, email, auth_method, access_token, password)?;
+
+    session.select(folder).map_err(|e| format!("Folder select failed: {}", e))?;
+
+    let uid_str = uid.to_string();
+    session.uid_store(&uid_str, "+FLAGS (\\Deleted)")
+        .map_err(|e| format!("IMAP store failed: {}", e))?;
+    session.expunge().map_err(|e| format!("IMAP expunge failed: {}", e))?;
+
+    session.logout().ok();
+    Ok(())
+}
+
+// ─── Batch Delete Emails ──────────────────────────────────────────────────────
+
+#[command]
+pub async fn batch_delete_emails(
+    imap_host: String,
+    imap_port: u16,
+    email: String,
+    auth_method: String,
+    access_token: Option<String>,
+    password: Option<String>,
+    folder: String,
+    uids: Vec<u32>,
+) -> Result<(), String> {
+    if uids.is_empty() { return Ok(()); }
+    tokio::task::spawn_blocking(move || {
+        batch_delete_emails_sync(
+            &imap_host, imap_port, &email, &auth_method,
+            access_token.as_deref(), password.as_deref(),
+            &folder, &uids,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+fn batch_delete_emails_sync(
+    host: &str, port: u16, email: &str, auth_method: &str,
+    access_token: Option<&str>, password: Option<&str>,
+    folder: &str, uids: &[u32],
+) -> Result<(), String> {
+    let client = imap::ClientBuilder::new(host, port)
+        .connect()
+        .map_err(|e| format!("IMAP connect failed: {}", e))?;
+
+    let mut session = imap_authenticate(client, email, auth_method, access_token, password)?;
+    session.select(folder).map_err(|e| format!("Folder select failed: {}", e))?;
+
+    // Build comma-separated UID sequence set: "1,2,3,4,5"
+    let uid_set: String = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+    session.uid_store(&uid_set, "+FLAGS (\\Deleted)")
+        .map_err(|e| format!("IMAP store failed: {}", e))?;
+    session.expunge().map_err(|e| format!("IMAP expunge failed: {}", e))?;
+
+    session.logout().ok();
+    Ok(())
+}
+
+// ─── Mark Email Read/Unread ───────────────────────────────────────────────────
+
+#[command]
+pub async fn mark_email_flag(
+    imap_host: String,
+    imap_port: u16,
+    email: String,
+    auth_method: String,
+    access_token: Option<String>,
+    password: Option<String>,
+    folder: String,
+    uid: u32,
+    flag: String,
+    add: bool,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        mark_flag_sync(
+            &imap_host, imap_port, &email, &auth_method,
+            access_token.as_deref(), password.as_deref(),
+            &folder, uid, &flag, add,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+fn mark_flag_sync(
+    host: &str, port: u16, email: &str, auth_method: &str,
+    access_token: Option<&str>, password: Option<&str>,
+    folder: &str, uid: u32, flag: &str, add: bool,
+) -> Result<(), String> {
+    let client = imap::ClientBuilder::new(host, port)
+        .connect()
+        .map_err(|e| format!("IMAP connect failed: {}", e))?;
+
+    let mut session = imap_authenticate(client, email, auth_method, access_token, password)?;
+
+    session.select(folder).map_err(|e| format!("Folder select failed: {}", e))?;
+
+    let uid_str = uid.to_string();
+    let store_cmd = if add {
+        format!("+FLAGS ({})", flag)
+    } else {
+        format!("-FLAGS ({})", flag)
+    };
+
+    session.uid_store(&uid_str, &store_cmd)
+        .map_err(|e| format!("IMAP store failed: {}", e))?;
+
+    session.logout().ok();
+    Ok(())
+}
+
+// ─── Fetch Raw Headers (for spam analysis) ────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpamAnalysis {
+    pub score: f64,
+    pub is_spam: bool,
+    pub reasons: Vec<SpamReason>,
+    pub spf_pass: bool,
+    pub dkim_pass: bool,
+    pub dmarc_pass: bool,
+    pub has_unsubscribe: bool,
+    pub unsubscribe_url: Option<String>,
+    pub list_unsubscribe: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpamReason {
+    pub name: String,
+    pub score: f64,
+    pub description: String,
+}
+
+#[command]
+pub async fn fetch_spam_analysis(
+    imap_host: String,
+    imap_port: u16,
+    email: String,
+    auth_method: String,
+    access_token: Option<String>,
+    password: Option<String>,
+    folder: String,
+    uid: u32,
+) -> Result<SpamAnalysis, String> {
+    tokio::task::spawn_blocking(move || {
+        fetch_spam_sync(
+            &imap_host, imap_port, &email, &auth_method,
+            access_token.as_deref(), password.as_deref(),
+            &folder, uid,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+fn fetch_spam_sync(
+    host: &str, port: u16, email: &str, auth_method: &str,
+    access_token: Option<&str>, password: Option<&str>,
+    folder: &str, uid: u32,
+) -> Result<SpamAnalysis, String> {
+    let client = imap::ClientBuilder::new(host, port)
+        .connect()
+        .map_err(|e| format!("IMAP connect failed: {}", e))?;
+
+    let mut session = imap_authenticate(client, email, auth_method, access_token, password)?;
+
+    session.select(folder).map_err(|e| format!("Folder select failed: {}", e))?;
+
+    let uid_str = uid.to_string();
+    let fetch_result = session
+        .uid_fetch(&uid_str, "BODY.PEEK[HEADER.FIELDS (X-Spam-Score X-Spam-Status X-Spam-Report X-Spam-Flag Authentication-Results ARC-Authentication-Results DKIM-Signature List-Unsubscribe List-Unsubscribe-Post Received-SPF)]")
+        .map_err(|e| format!("Fetch spam headers failed: {}", e))?;
+
+    let msg = fetch_result.iter().next().ok_or("Message not found")?;
+    let header_bytes = msg.header().unwrap_or_default();
+    let headers_raw = String::from_utf8_lossy(header_bytes).to_string();
+
+    session.logout().ok();
+
+    analyze_spam_from_headers(&headers_raw)
+}
+
+fn analyze_spam_from_headers(headers: &str) -> Result<SpamAnalysis, String> {
+    let headers_lower = headers.to_lowercase();
+    let mut score: f64 = 0.0;
+    let mut reasons = Vec::new();
+
+    // Parse X-Spam-Score header
+    if let Some(score_line) = extract_header_value(headers, "X-Spam-Score") {
+        if let Ok(s) = score_line.trim().parse::<f64>() {
+            score = s;
+        }
+    }
+
+    // Parse X-Spam-Status for details
+    if let Some(status) = extract_header_value(headers, "X-Spam-Status") {
+        let status_lower = status.to_lowercase();
+        if status_lower.starts_with("yes") {
+            score = score.max(5.0);
+        }
+        // Extract individual test scores: tests=TEST1=1.2,TEST2=3.4
+        if let Some(tests_start) = status.find("tests=") {
+            let tests_str = &status[tests_start + 6..];
+            let tests_end = tests_str.find(|c: char| c == '\r' || c == '\n').unwrap_or(tests_str.len());
+            let tests = &tests_str[..tests_end];
+            for test in tests.split(',') {
+                let parts: Vec<&str> = test.trim().splitn(2, '=').collect();
+                if parts.len() == 2 {
+                    let name = parts[0].trim().to_string();
+                    let s: f64 = parts[1].trim().parse().unwrap_or(0.0);
+                    if s.abs() > 0.01 {
+                        reasons.push(SpamReason {
+                            name: name.clone(),
+                            score: s,
+                            description: format!("{}: {:.1}", name, s),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // SPF check
+    let spf_pass = headers_lower.contains("spf=pass")
+        || headers_lower.contains("received-spf: pass");
+
+    // DKIM check
+    let dkim_pass = headers_lower.contains("dkim=pass");
+
+    // DMARC check
+    let dmarc_pass = headers_lower.contains("dmarc=pass");
+
+    // Auth failures add to spam score
+    if !spf_pass {
+        score += 2.0;
+        reasons.push(SpamReason {
+            name: "SPF_FAIL".to_string(),
+            score: 2.0,
+            description: "SPF authentication failed".to_string(),
+        });
+    }
+    if !dkim_pass {
+        score += 1.5;
+        reasons.push(SpamReason {
+            name: "DKIM_FAIL".to_string(),
+            score: 1.5,
+            description: "DKIM signature missing/failed".to_string(),
+        });
+    }
+    if !dmarc_pass {
+        score += 1.5;
+        reasons.push(SpamReason {
+            name: "DMARC_FAIL".to_string(),
+            score: 1.5,
+            description: "DMARC policy check failed".to_string(),
+        });
+    }
+
+    // List-Unsubscribe header
+    let has_unsubscribe = headers_lower.contains("list-unsubscribe");
+    let unsubscribe_url = extract_header_value(headers, "List-Unsubscribe")
+        .and_then(|v| {
+            // Extract URL from <url> format
+            if let Some(start) = v.find('<') {
+                if let Some(end) = v[start..].find('>') {
+                    let url = &v[start + 1..start + end];
+                    if url.starts_with("http") {
+                        return Some(url.to_string());
+                    }
+                }
+            }
+            None
+        });
+    let list_unsubscribe = extract_header_value(headers, "List-Unsubscribe");
+
+    // Apply client-side heuristics if no X-Spam-Score header present  
+    if score == 0.0 && reasons.is_empty() && !spf_pass && !dkim_pass {
+        score = 5.0;
+    }
+
+    let is_spam = score >= 5.0;
+
+    // Sort reasons by score descending
+    reasons.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(SpamAnalysis {
+        score,
+        is_spam,
+        reasons,
+        spf_pass,
+        dkim_pass,
+        dmarc_pass,
+        has_unsubscribe,
+        unsubscribe_url,
+        list_unsubscribe,
+    })
+}
+
+fn extract_header_value(headers: &str, name: &str) -> Option<String> {
+    let search = format!("{}:", name);
+    let search_lower = search.to_lowercase();
+    for line in headers.lines() {
+        if line.to_lowercase().starts_with(&search_lower) {
+            let value = line[search.len()..].trim().to_string();
+            return Some(value);
+        }
+    }
+    None
+}
+
+// ─── IMAP Search ──────────────────────────────────────────────────────────────
+
+#[command]
+pub async fn search_emails(
+    imap_host: String,
+    imap_port: u16,
+    email: String,
+    auth_method: String,
+    access_token: Option<String>,
+    password: Option<String>,
+    folder: String,
+    query: String,
+) -> Result<Vec<u32>, String> {
+    tokio::task::spawn_blocking(move || {
+        search_emails_sync(
+            &imap_host, imap_port, &email, &auth_method,
+            access_token.as_deref(), password.as_deref(),
+            &folder, &query,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+fn search_emails_sync(
+    host: &str, port: u16, email: &str, auth_method: &str,
+    access_token: Option<&str>, password: Option<&str>,
+    folder: &str, query: &str,
+) -> Result<Vec<u32>, String> {
+    let client = imap::ClientBuilder::new(host, port)
+        .connect()
+        .map_err(|e| format!("IMAP connect failed: {}", e))?;
+
+    let mut session = imap_authenticate(client, email, auth_method, access_token, password)?;
+
+    session.select(folder).map_err(|e| format!("Folder select failed: {}", e))?;
+
+    // IMAP SEARCH with subject/from/body
+    let search_query = format!(
+        "OR OR SUBJECT \"{}\" FROM \"{}\" BODY \"{}\"",
+        query, query, query
+    );
+
+    let uids = session.uid_search(&search_query)
+        .map_err(|e| format!("IMAP search failed: {}", e))?;
+
+    let result: Vec<u32> = uids.into_iter().collect();
+
+    session.logout().ok();
+    Ok(result)
+}
+
+// ─── Sanitize HTML for rendering ──────────────────────────────────────────────
+
+#[command]
+pub fn sanitize_email_html(html: String, dark_mode: bool) -> String {
+    let mut sanitized = html;
+
+    // 1. Remove script tags and content
+    while let Some(start) = sanitized.to_lowercase().find("<script") {
+        if let Some(end) = sanitized.to_lowercase()[start..].find("</script>") {
+            sanitized = format!("{}{}", &sanitized[..start], &sanitized[start + end + 9..]);
+        } else {
+            // Unclosed script tag — remove to end
+            sanitized = sanitized[..start].to_string();
+            break;
+        }
+    }
+
+    // 2. Remove event handlers (onclick, onload, onerror, etc.)
+    let event_pattern = regex_lite::Regex::new(r#"\s+on\w+\s*=\s*["'][^"']*["']"#).unwrap();
+    sanitized = event_pattern.replace_all(&sanitized, "").to_string();
+
+    // 3. Remove javascript: URLs
+    let js_pattern = regex_lite::Regex::new(r#"href\s*=\s*["']javascript:[^"']*["']"#).unwrap();
+    sanitized = js_pattern.replace_all(&sanitized, r##"href="#""##).to_string();
+
+    // 4. Remove <style> blocks that might conflict
+    // Keep them but inject our overrides after
+
+    // 5. Dark mode CSS injection
+    let dark_css = if dark_mode {
+        r#"<style>
+            *, *::before, *::after {
+                color: #e4e4e7 !important;
+                border-color: #3f3f46 !important;
+            }
+            body, html { background-color: #18181b !important; }
+            div, td, th, tr, table, section, article, header, footer, main, aside, nav {
+                background-color: transparent !important;
+                background-image: none !important;
+            }
+            a, a * { color: #93c5fd !important; }
+            blockquote { border-left-color: #52525b !important; color: #a1a1aa !important; }
+            hr { border-color: #3f3f46 !important; }
+            img { max-width: 100% !important; height: auto !important; }
+            pre, code { background-color: #27272a !important; color: #d4d4d8 !important; }
+            [style*="background"] {
+                background-color: transparent !important;
+                background-image: none !important;
+            }
+            [style*="color"] { color: #e4e4e7 !important; }
+            font { color: #e4e4e7 !important; }
+            /* Preserve dark-on-light images */
+            img[style*="background"], img[class*="logo"] { filter: none !important; }
+        </style>"#
+    } else {
+        r#"<style>
+            body { background-color: #ffffff; color: #333333; }
+            img { max-width: 100% !important; height: auto !important; }
+        </style>"#
+    };
+
+    // 6. Build complete document
+    let base_css = r#"<style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            padding: 16px;
+            margin: 0;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        img { max-width: 100% !important; height: auto !important; }
+        a { text-decoration: underline; }
+        table { max-width: 100% !important; }
+        pre { white-space: pre-wrap; overflow-x: auto; }
+    </style>"#;
+
+    format!(
+        "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>{}{}</head><body>{}</body></html>",
+        base_css, dark_css, sanitized
+    )
+}
+
+// ─── Shared IMAP Auth Helper ──────────────────────────────────────────────────
+
+fn imap_authenticate<C: std::io::Read + std::io::Write>(
+    client: imap::Client<C>,
+    email: &str,
+    auth_method: &str,
+    access_token: Option<&str>,
+    password: Option<&str>,
+) -> Result<imap::Session<C>, String> {
+    match auth_method {
+        "oauth2" => {
+            let token = access_token.ok_or("No access token for OAuth2")?;
+            let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, token);
+            client
+                .authenticate("XOAUTH2", &XOAuth2Authenticator { response: auth_string })
+                .map_err(|(e, _)| format!("XOAUTH2 auth failed: {}", e))
+        }
+        _ => {
+            let pass = password.ok_or("No password")?;
+            client
+                .login(email, pass)
+                .map_err(|(e, _)| format!("IMAP login failed: {}", e))
+        }
+    }
 }
 
 // ─── XOAUTH2 Authenticator ──────────────────────────────────────────────────

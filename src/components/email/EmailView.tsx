@@ -1,105 +1,151 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+/**
+ * EmailView.tsx — Main email client shell.
+ * Unified inbox across all accounts, category tabs, keyboard shortcuts,
+ * 15-minute undo send, spam analysis, and modular component architecture.
+ *
+ * This replaces the original monolithic EmailView.tsx.
+ */
+
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
-import { start, cancel, onUrl } from '@fabianlars/tauri-plugin-oauth';
 import {
-    Inbox, Send, Star, Trash2, Archive, Clock, Paperclip, Search,
-    MailPlus, Shield, RefreshCw, ChevronLeft, Reply, ReplyAll, Forward,
-    X, AlertCircle, Plus, Loader2, ExternalLink
+    Inbox, Send, Star, Trash2, Archive, Clock, Search, MailPlus,
+    Shield, RefreshCw, X, Plus, ExternalLink, MailOpen,
 } from 'lucide-react';
 import { IS_TAURI } from '../../hooks/usePlatform';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Modular components
+import InboxTabs from './InboxTabs';
+import ThreadList from './ThreadList';
+import EmailViewer from './EmailViewer';
+import MiniComposer from './MiniComposer';
+import UndoToast from './UndoToast';
+import AccountSetup from './AccountSetup';
+import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 
-interface EmailAccount {
-    id: string;
-    email: string;
-    displayName: string;
-    provider: 'Gmail' | 'Microsoft' | 'Custom';
-    imapHost: string;
-    imapPort: number;
-    smtpHost: string;
-    smtpPort: number;
-    authMethod: 'oauth2' | 'password';
-    accessToken?: string;
-    refreshToken?: string;
-    password?: string;
-    clientId?: string;
-}
+// Store
+import {
+    useEmailStore,
+    categorizeEmail,
+    type EmailAccount,
+    type EmailHeader,
+    type EmailBody,
+    type EmailCategory,
+    type QueuedDraft,
+    type SpamAnalysis,
+} from '../../store/emailStore';
 
-interface EmailHeader {
-    uid: number;
-    from: string;
-    to: string;
-    subject: string;
-    date: string;
-    preview: string;
-    is_read: boolean;
-    has_attachments: boolean;
-    message_id: string;
-    in_reply_to: string | null;
-    references: string[];
-}
-
-interface EmailBody {
-    uid: number;
-    html: string | null;
-    text: string | null;
-    attachments: { filename: string; mime_type: string; size: number; data: string }[];
-}
-
-interface ProviderConfig {
-    provider: 'Gmail' | 'Microsoft' | 'Custom';
-    provider_name: string;
-    imap_host: string;
-    imap_port: number;
-    smtp_host: string;
-    smtp_port: number;
-    auth_method: 'OAuth2' | 'Password';
-    oauth_auth_url: string | null;
-    oauth_token_url: string | null;
-    oauth_scopes: string[] | null;
-}
-
-interface OAuthTokenResponse {
-    access_token: string;
-    refresh_token: string | null;
-    token_type: string;
-    expires_in: number | null;
-    scope: string | null;
-}
-
-type Folder = {
-    icon: React.ComponentType<{ size?: number; className?: string }>;
-    label: string;
-    imapName: string;
-    count: number;
-};
-
-// ─── Constants ────────────────────────────────────────────────────────────────
+/* ─── Constants ──────────────────────────────────────────────── */
 
 const ACCOUNTS_STORAGE_KEY = 'onyx-email-accounts';
 const ACCOUNTS_CREDS_KEY = 'onyx-email-creds';
-const POLL_INTERVAL = 60_000; // 60 seconds
+const EMAIL_CACHE_KEY = 'onyx-email-cache';
+const POLL_INTERVAL = 60_000;
 
-const DEFAULT_FOLDERS: Folder[] = [
-    { icon: Inbox, label: 'Inbox', imapName: 'INBOX', count: 0 },
-    { icon: Star, label: 'Starred', imapName: '[Gmail]/Starred', count: 0 },
-    { icon: Send, label: 'Sent', imapName: '[Gmail]/Sent Mail', count: 0 },
-    { icon: Clock, label: 'Drafts', imapName: '[Gmail]/Drafts', count: 0 },
-    { icon: Archive, label: 'Archive', imapName: '[Gmail]/All Mail', count: 0 },
-    { icon: Trash2, label: 'Trash', imapName: '[Gmail]/Trash', count: 0 },
+/** Refresh OAuth2 access token if the account uses OAuth. Returns the (possibly refreshed) token. */
+async function ensureFreshToken(acct: EmailAccount): Promise<string | null> {
+    if (acct.authMethod !== 'oauth2') return null;
+    if (!acct.refreshToken || !acct.clientId) return acct.accessToken || null;
+    try {
+        const resp = await invoke<{ access_token: string }>('refresh_oauth_token', {
+            provider: (acct.provider || 'Gmail').toLowerCase(),
+            refreshToken: acct.refreshToken,
+            clientId: acct.clientId,
+        });
+        // Mutate in-place so all subsequent calls within this cycle use the fresh token
+        acct.accessToken = resp.access_token;
+        return resp.access_token;
+    } catch (err) {
+        console.warn(`[Email] Token refresh failed for ${acct.email}, using cached:`, err);
+        return acct.accessToken || null;
+    }
+}
+
+type FolderDef = {
+    icon: React.ComponentType<{ size?: number; className?: string }>;
+    label: string;
+    key: string;
+};
+
+const CANONICAL_FOLDERS: FolderDef[] = [
+    { icon: Inbox, label: 'Inbox', key: 'INBOX' },
+    { icon: Star, label: 'Starred', key: 'Starred' },
+    { icon: Send, label: 'Sent', key: 'Sent' },
+    { icon: Clock, label: 'Drafts', key: 'Drafts' },
+    { icon: Archive, label: 'Archive', key: 'Archive' },
+    { icon: Trash2, label: 'Trash', key: 'Trash' },
 ];
 
-// ─── OAuth Client IDs (read from .env — public / native, no secret needed) ───
+/* Maps canonical folder key → possible IMAP folder names (priority order).
+   First match found on the server wins. */
+const FOLDER_IMAP_ALIASES: Record<string, string[]> = {
+    'INBOX': ['INBOX'],
+    'Starred': ['[Gmail]/Starred', 'Flagged', 'INBOX.Flagged'],
+    'Sent': ['[Gmail]/Sent Mail', 'Sent Items', 'Sent', 'INBOX.Sent'],
+    'Drafts': ['[Gmail]/Drafts', 'Drafts', 'INBOX.Drafts'],
+    'Archive': ['[Gmail]/All Mail', 'Archive', 'INBOX.Archive'],
+    'Trash': ['[Gmail]/Trash', '[Gmail]/Bin', 'Deleted Items', 'Trash', 'INBOX.Trash'],
+};
 
-// ─── Helper: Encrypt for IndexedDB storage ────────────────────────────────────
+/** Resolve a folder key (canonical or raw IMAP name) to the actual server folder. */
+function resolveImapFolder(key: string, serverFolders: string[]): string | null {
+    if (key === 'INBOX') return 'INBOX';
+    // Direct match
+    const direct = serverFolders.find(f => f.toLowerCase() === key.toLowerCase());
+    if (direct) return direct;
+    // Canonical alias lookup
+    const aliases = FOLDER_IMAP_ALIASES[key];
+    if (aliases) {
+        for (const alias of aliases) {
+            const match = serverFolders.find(f => f.toLowerCase() === alias.toLowerCase());
+            if (match) return match;
+        }
+    }
+    // Reverse lookup: key might be a provider-specific IMAP name — find its canonical group
+    for (const aliasList of Object.values(FOLDER_IMAP_ALIASES)) {
+        if (aliasList.some(a => a.toLowerCase() === key.toLowerCase())) {
+            for (const alias of aliasList) {
+                const match = serverFolders.find(f => f.toLowerCase() === alias.toLowerCase());
+                if (match) return match;
+            }
+        }
+    }
+    return null;
+}
+
+/* ─── Provider Icons ─────────────────────────────────────────── */
+
+function ProviderIcon({ provider, className }: { provider: string; className?: string }) {
+    if (provider === 'Gmail') {
+        // Google "G" multicolor logo
+        return (
+            <svg viewBox="0 0 48 48" className={className || 'w-4 h-4'}>
+                <path d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" fill="#FFC107"/>
+                <path d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" fill="#FF3D00"/>
+                <path d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0124 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z" fill="#4CAF50"/>
+                <path d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" fill="#1976D2"/>
+            </svg>
+        );
+    }
+    if (provider === 'Microsoft') {
+        return (
+            <svg viewBox="0 0 24 24" className={className || 'w-4 h-4'}>
+                <path d="M0 0h11.377v11.372H0z" fill="#F25022"/>
+                <path d="M12.623 0H24v11.372H12.623z" fill="#7FBA00"/>
+                <path d="M0 12.623h11.377V24H0z" fill="#00A4EF"/>
+                <path d="M12.623 12.623H24V24H12.623z" fill="#FFB900"/>
+            </svg>
+        );
+    }
+    return null;
+}
+
+/* ─── Crypto Helpers (E2EE for localStorage) ─────────────────── */
 
 async function encryptForStorage(data: string): Promise<string> {
     const mk = localStorage.getItem('onyx_mk') || localStorage.getItem('onyx_offline_mk');
     if (!mk) return data;
-
     try {
         const keyBuffer = Uint8Array.from(atob(mk), c => c.charCodeAt(0));
         const key = await crypto.subtle.importKey('raw', keyBuffer, 'AES-GCM', false, ['encrypt']);
@@ -110,15 +156,12 @@ async function encryptForStorage(data: string): Promise<string> {
         combined.set(iv);
         combined.set(new Uint8Array(ciphertext), iv.byteLength);
         return btoa(String.fromCharCode(...combined));
-    } catch {
-        return data;
-    }
+    } catch { return data; }
 }
 
 async function decryptFromStorage(data: string): Promise<string> {
     const mk = localStorage.getItem('onyx_mk') || localStorage.getItem('onyx_offline_mk');
     if (!mk) return data;
-
     try {
         const combined = Uint8Array.from(atob(data), c => c.charCodeAt(0));
         const iv = combined.slice(0, 12);
@@ -127,88 +170,8 @@ async function decryptFromStorage(data: string): Promise<string> {
         const key = await crypto.subtle.importKey('raw', keyBuffer, 'AES-GCM', false, ['decrypt']);
         const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
         return new TextDecoder().decode(decrypted);
-    } catch {
-        return data;
-    }
+    } catch { return data; }
 }
-
-// ─── Helper: Avatar initials ──────────────────────────────────────────────────
-
-function getInitials(name: string): string {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return (name[0] || '?').toUpperCase();
-}
-
-function getAvatarColor(name: string): string {
-    const colors = [
-        'bg-violet-500/20 text-violet-400',
-        'bg-blue-500/20 text-blue-400',
-        'bg-emerald-500/20 text-emerald-400',
-        'bg-amber-500/20 text-amber-400',
-        'bg-rose-500/20 text-rose-400',
-        'bg-cyan-500/20 text-cyan-400',
-        'bg-indigo-500/20 text-indigo-400',
-    ];
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    return colors[Math.abs(hash) % colors.length];
-}
-
-// ─── Helper: Relative time ────────────────────────────────────────────────────
-
-function formatRelativeDate(dateStr: string): string {
-    try {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diffMs = now.getTime() - date.getTime();
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMs / 3600000);
-        const diffDays = Math.floor(diffMs / 86400000);
-
-        if (diffMins < 1) return 'Now';
-        if (diffMins < 60) return `${diffMins}m`;
-        if (diffHours < 24) return `${diffHours}h`;
-        if (diffDays < 7) return `${diffDays}d`;
-        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    } catch {
-        return dateStr;
-    }
-}
-
-// ─── Helper: PKCE ─────────────────────────────────────────────────────────────
-
-function generateCodeVerifier(): string {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function generateCodeChallenge(verifier: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    const digest = await crypto.subtle.digest('SHA-256', data);
-    return btoa(String.fromCharCode(...new Uint8Array(digest)))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-}
-
-// ─── Helper: Detect Outlook realm from email domain ──────────────────────────
-
-function getOutlookRealm(email: string): string | null {
-    const domain = email.split('@')[1]?.toLowerCase();
-    if (!domain) return null;
-    // RMIT University
-    if (domain.includes('rmit.edu.au')) return 'student.rmit.edu.au';
-    // Generic .edu / .edu.au — use the domain itself as realm
-    if (domain.endsWith('.edu') || domain.endsWith('.edu.au') || domain.endsWith('.ac.uk')) return domain;
-    return null;
-}
-
-// ─── Email Cache (localStorage + E2EE) ────────────────────────────────────────
-
-const EMAIL_CACHE_KEY = 'onyx-email-cache';
 
 async function cacheEmails(accountId: string, folder: string, headers: EmailHeader[]): Promise<void> {
     try {
@@ -216,9 +179,7 @@ async function cacheEmails(accountId: string, folder: string, headers: EmailHead
         const data = JSON.stringify(headers);
         const encrypted = await encryptForStorage(data);
         localStorage.setItem(key, encrypted);
-    } catch (err) {
-        console.error('[Email] Cache write error:', err);
-    }
+    } catch (err) { console.error('[Email] Cache write error:', err); }
 }
 
 async function getCachedEmails(accountId: string, folder: string): Promise<EmailHeader[]> {
@@ -228,706 +189,86 @@ async function getCachedEmails(accountId: string, folder: string): Promise<Email
         if (!encrypted) return [];
         const data = await decryptFromStorage(encrypted);
         return JSON.parse(data);
-    } catch {
-        return [];
-    }
+    } catch { return []; }
 }
 
-// ─── Account Setup Modal ──────────────────────────────────────────────────────
+/* ─── Avatar helpers ─────────────────────────────────────────── */
 
-function AccountSetupModal({
-    isOpen,
-    onClose,
-    onAccountAdded,
-}: {
-    isOpen: boolean;
-    onClose: () => void;
-    onAccountAdded: (account: EmailAccount) => void;
-}) {
-    const [step, setStep] = useState<'email' | 'provider' | 'auth' | 'manual'>('email');
-    const [email, setEmail] = useState('');
-    const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(null);
-    const [detecting, setDetecting] = useState(false);
-    const [error, setError] = useState('');
-    const [manualPassword, setManualPassword] = useState('');
-    const [manualImapHost, setManualImapHost] = useState('');
-    const [manualImapPort, setManualImapPort] = useState('993');
-    const [manualSmtpHost, setManualSmtpHost] = useState('');
-    const [manualSmtpPort, setManualSmtpPort] = useState('587');
-    const [oauthLoading, setOauthLoading] = useState(false);
-
-    const isTauri = IS_TAURI;
-
-    const handleDetectProvider = async () => {
-        if (!email.includes('@')) {
-            setError('Please enter a valid email address');
-            return;
-        }
-
-        setDetecting(true);
-        setError('');
-
-        try {
-            if (isTauri) {
-                const config = await invoke<ProviderConfig>('detect_email_provider', { email });
-                setProviderConfig(config);
-
-                if (config.auth_method === 'OAuth2') {
-                    setStep('provider');
-                } else {
-                    setManualImapHost(config.imap_host);
-                    setManualImapPort(config.imap_port.toString());
-                    setManualSmtpHost(config.smtp_host);
-                    setManualSmtpPort(config.smtp_port.toString());
-                    setStep('manual');
-                }
-            } else {
-                const domain = email.split('@')[1]?.toLowerCase();
-                if (domain === 'gmail.com') {
-                    setProviderConfig({
-                        provider: 'Gmail',
-                        provider_name: 'Google',
-                        imap_host: 'imap.gmail.com',
-                        imap_port: 993,
-                        smtp_host: 'smtp.gmail.com',
-                        smtp_port: 587,
-                        auth_method: 'OAuth2',
-                        oauth_auth_url: null,
-                        oauth_token_url: null,
-                        oauth_scopes: null,
-                    });
-                    setStep('provider');
-                } else if (
-                    domain === 'outlook.com' ||
-                    domain === 'hotmail.com' ||
-                    domain === 'live.com'
-                ) {
-                    setProviderConfig({
-                        provider: 'Microsoft',
-                        provider_name: 'Microsoft',
-                        imap_host: 'outlook.office365.com',
-                        imap_port: 993,
-                        smtp_host: 'smtp.office365.com',
-                        smtp_port: 587,
-                        auth_method: 'OAuth2',
-                        oauth_auth_url: null,
-                        oauth_token_url: null,
-                        oauth_scopes: null,
-                    });
-                    setStep('provider');
-                } else {
-                    // Bug 3 fix: use raw domain directly, never append .com
-                    setManualImapHost(`imap.${domain}`);
-                    setManualSmtpHost(`smtp.${domain}`);
-                    setStep('manual');
-                }
-            }
-        } catch (err: any) {
-            setError(err.toString());
-        } finally {
-            setDetecting(false);
-        }
-    };
-
-    const handleOAuthSign = async () => {
-        if (!providerConfig || !isTauri) return;
-        setError('');
-        setOauthLoading(true);
-
-        let oauthPort: number | null = null;
-
-        try {
-            // 1) Generate PKCE pair
-            const codeVerifier = generateCodeVerifier();
-            const codeChallenge = await generateCodeChallenge(codeVerifier);
-
-            // 2) Start local OAuth redirect server
-            oauthPort = await start({ ports: [17927, 17928, 17929, 17930] });
-            const redirectUri = `http://localhost:${oauthPort}`;
-
-            // 3) Determine OAuth params based on provider
-            let authUrl: string;
-            let clientId: string;
-
-            if (providerConfig.provider === 'Gmail') {
-                clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-                authUrl =
-                    `https://accounts.google.com/o/oauth2/v2/auth` +
-                    `?client_id=${encodeURIComponent(clientId)}` +
-                    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-                    `&scope=${encodeURIComponent('https://mail.google.com/')}` +
-                    `&response_type=code` +
-                    `&code_challenge=${codeChallenge}` +
-                    `&code_challenge_method=S256`;
-            } else {
-                // Microsoft Graph
-                clientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID;
-                authUrl =
-                    `https://login.microsoftonline.com/common/oauth2/v2.0/authorize` +
-                    `?client_id=${encodeURIComponent(clientId)}` +
-                    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-                    `&scope=${encodeURIComponent('https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send offline_access')}` +
-                    `&response_type=code` +
-                    `&code_challenge=${codeChallenge}` +
-                    `&code_challenge_method=S256` +
-                    `&prompt=consent`;
-            }
-
-            // 4) Set up URL listener to receive the OAuth redirect
-            const tokenPromise = new Promise<OAuthTokenResponse>((resolve, reject) => {
-                let resolved = false;
-                const timeout = setTimeout(() => {
-                    if (!resolved) {
-                        resolved = true;
-                        reject(new Error('OAuth timed out after 120 seconds'));
-                    }
-                }, 120_000);
-
-                onUrl(async (urlStr: string) => {
-                    if (resolved) return;
-                    try {
-                        const url = new URL(urlStr);
-                        const code = url.searchParams.get('code');
-                        const errorParam = url.searchParams.get('error');
-
-                        if (errorParam) {
-                            resolved = true;
-                            clearTimeout(timeout);
-                            reject(new Error(`OAuth error: ${errorParam}`));
-                            return;
-                        }
-
-                        if (!code) {
-                            resolved = true;
-                            clearTimeout(timeout);
-                            reject(new Error('No authorization code received'));
-                            return;
-                        }
-
-                        // Exchange code for token via Tauri command
-                        const tokenResponse = await invoke<OAuthTokenResponse>(
-                            'exchange_oauth_code',
-                            {
-                                provider: providerConfig.provider === 'Gmail' ? 'google' : 'microsoft',
-                                code,
-                                redirectUri,
-                                clientId,
-                                codeVerifier,
-                            }
-                        );
-
-                        resolved = true;
-                        clearTimeout(timeout);
-                        resolve(tokenResponse);
-                    } catch (err) {
-                        resolved = true;
-                        clearTimeout(timeout);
-                        reject(err);
-                    }
-                });
-            });
-
-            // 5) Open browser for user to sign in
-            await openUrl(authUrl);
-
-            // 6) Wait for the token exchange to complete
-            const tokenResponse = await tokenPromise;
-
-            // 7) Build account with access token
-            const account: EmailAccount = {
-                id: crypto.randomUUID(),
-                email,
-                displayName: email.split('@')[0],
-                provider: providerConfig.provider,
-                imapHost: providerConfig.imap_host,
-                imapPort: providerConfig.imap_port,
-                smtpHost: providerConfig.smtp_host,
-                smtpPort: providerConfig.smtp_port,
-                authMethod: 'oauth2',
-                accessToken: tokenResponse.access_token,
-                refreshToken: tokenResponse.refresh_token ?? undefined,
-                clientId,
-            };
-
-            onAccountAdded(account);
-            handleClose();
-        } catch (err: any) {
-            const errStr = err.toString();
-            setError(errStr);
-
-            // ── Outlook WebView fallback ──────────────────────────────────
-            // If the error looks like an IT / admin / consent block (common
-            // at universities like RMIT), offer the embedded Outlook WebView.
-            const blockedPatterns = ['admin', 'blocked', 'approval', 'consent', 'AADSTS', 'unauthorized_client', 'access_denied'];
-            const isBlocked = blockedPatterns.some(p => errStr.toLowerCase().includes(p.toLowerCase()));
-
-            // Detect redirect_uri mismatch (common Google OAuth error)
-            if (errStr.toLowerCase().includes('redirect_uri') || errStr.toLowerCase().includes('redirect_uri_mismatch')) {
-                setError(
-                    `OAuth redirect mismatch. Ensure these URIs are registered in your Google/Microsoft Console: ` +
-                    `http://localhost:17927, http://localhost:17928, http://localhost:17929, http://localhost:17930`
-                );
-            } else if (isBlocked && isTauri) {
-                setError('Your university/org IT blocks third-party apps. Opening Outlook inside Onyx instead!');
-
-                // Auto-open WebView after 2 seconds with realm detection
-                const realm = getOutlookRealm(email);
-                setTimeout(() => {
-                    invoke('open_outlook_onyx', { realm }).catch(e => console.error('[Outlook WebView]', e));
-                }, 2000);
-            }
-        } finally {
-            setOauthLoading(false);
-            if (oauthPort !== null) {
-                cancel(oauthPort).catch(() => {});
-            }
-        }
-    };
-
-    const handleManualAdd = async () => {
-        if (!manualPassword) {
-            setError('Password is required');
-            return;
-        }
-
-        // Bug 3 fix: extract domain directly — never append .com or any suffix.
-        // Use the IMAP host from the input or fall back to imap.<domain>.
-        const domain = email.split('@')[1];
-
-        const account: EmailAccount = {
-            id: crypto.randomUUID(),
-            email,
-            displayName: email.split('@')[0],
-            provider: 'Custom',
-            imapHost: manualImapHost || `imap.${domain}`,
-            imapPort: parseInt(manualImapPort) || 993,
-            smtpHost: manualSmtpHost || `smtp.${domain}`,
-            smtpPort: parseInt(manualSmtpPort) || 587,
-            authMethod: 'password',
-            password: manualPassword,
-        };
-
-        onAccountAdded(account);
-        handleClose();
-    };
-
-    const handleClose = () => {
-        setStep('email');
-        setEmail('');
-        setProviderConfig(null);
-        setError('');
-        setManualPassword('');
-        setOauthLoading(false);
-        onClose();
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="w-110 bg-zinc-900 border border-zinc-800/80 rounded-2xl shadow-2xl overflow-hidden" style={{ animation: 'fadeIn 0.15s ease-out' }}>
-                {/* Header */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800/50">
-                    <h3 className="text-lg font-bold text-zinc-100">Add Email Account</h3>
-                    <button onClick={handleClose} className="p-1 rounded-md hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors">
-                        <X size={18} />
-                    </button>
-                </div>
-
-                <div className="p-5 space-y-4">
-                    {error && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
-                            <AlertCircle size={14} />
-                            {error}
-                        </div>
-                    )}
-
-                    {/* Step 1: Enter email */}
-                    {step === 'email' && (
-                        <>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-400">Email Address</label>
-                                <input
-                                    type="email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleDetectProvider()}
-                                    placeholder="you@example.com"
-                                    className="w-full px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-zinc-200 text-sm placeholder-zinc-600 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 transition-all"
-                                    autoFocus
-                                />
-                            </div>
-                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/10">
-                                <Shield size={14} className="text-amber-400 shrink-0" />
-                                <span className="text-[11px] text-zinc-500">
-                                    100% client-side. Your credentials never leave this device.
-                                </span>
-                            </div>
-                            <button
-                                onClick={handleDetectProvider}
-                                disabled={detecting || !email}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-semibold"
-                            >
-                                {detecting ? <Loader2 size={16} className="animate-spin" /> : null}
-                                {detecting ? 'Detecting provider...' : 'Continue'}
-                            </button>
-                        </>
-                    )}
-
-                    {/* Step 2: Provider detected — OAuth */}
-                    {step === 'provider' && providerConfig && (
-                        <>
-                            <div className="text-center space-y-3">
-                                <div className="w-16 h-16 rounded-2xl bg-zinc-800 border border-zinc-700/30 flex items-center justify-center mx-auto">
-                                    {providerConfig.provider === 'Gmail' && (
-                                        <span className="text-2xl">📧</span>
-                                    )}
-                                    {providerConfig.provider === 'Microsoft' && (
-                                        <span className="text-2xl">📬</span>
-                                    )}
-                                </div>
-                                <div>
-                                    <p className="text-sm text-zinc-300">
-                                        <span className="font-semibold text-zinc-100">{providerConfig.provider_name}</span> detected
-                                    </p>
-                                    <p className="text-xs text-zinc-600 mt-0.5">{email}</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-2">
-                                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                                    <div className="px-2.5 py-1.5 rounded bg-zinc-800/50 border border-zinc-700/20">
-                                        <span className="text-zinc-600">IMAP</span>
-                                        <span className="ml-1 text-zinc-400">{providerConfig.imap_host}:{providerConfig.imap_port}</span>
-                                    </div>
-                                    <div className="px-2.5 py-1.5 rounded bg-zinc-800/50 border border-zinc-700/20">
-                                        <span className="text-zinc-600">SMTP</span>
-                                        <span className="ml-1 text-zinc-400">{providerConfig.smtp_host}:{providerConfig.smtp_port}</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleOAuthSign}
-                                disabled={oauthLoading}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-semibold"
-                            >
-                                {oauthLoading ? <Loader2 size={16} className="animate-spin" /> : null}
-                                {oauthLoading
-                                    ? 'Waiting for sign-in...'
-                                    : `Sign in with ${providerConfig.provider_name}`}
-                            </button>
-
-                            {/* Outlook WebView fallback — for uni/org-blocked OAuth */}
-                            {providerConfig.provider === 'Microsoft' && isTauri && (
-                                <button
-                                    onClick={() => {
-                                        const realm = getOutlookRealm(email);
-                                        invoke('open_outlook_onyx', { realm }).catch(e => console.error('[Outlook WebView]', e));
-                                        handleClose();
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors text-xs font-medium"
-                                >
-                                    <ExternalLink size={14} />
-                                    Open Outlook in Onyx (if sign-in is blocked)
-                                </button>
-                            )}
-
-                            <button
-                                onClick={() => setStep('email')}
-                                className="w-full text-xs text-zinc-600 hover:text-zinc-400 transition-colors py-1"
-                            >
-                                ← Back
-                            </button>
-                        </>
-                    )}
-
-                    {/* Step 3: Manual credentials */}
-                    {step === 'manual' && (
-                        <>
-                            <div className="space-y-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-zinc-500">Password</label>
-                                    <input
-                                        type="password"
-                                        value={manualPassword}
-                                        onChange={(e) => setManualPassword(e.target.value)}
-                                        placeholder="Your email password or app password"
-                                        className="w-full px-3 py-2 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-zinc-200 text-sm placeholder-zinc-600 outline-none focus:border-amber-500/50 transition-all"
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-medium text-zinc-500">IMAP Host</label>
-                                        <input
-                                            type="text"
-                                            value={manualImapHost}
-                                            onChange={(e) => setManualImapHost(e.target.value)}
-                                            className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-zinc-200 text-xs outline-none focus:border-amber-500/50 transition-all"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-medium text-zinc-500">IMAP Port</label>
-                                        <input
-                                            type="text"
-                                            value={manualImapPort}
-                                            onChange={(e) => setManualImapPort(e.target.value)}
-                                            className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-zinc-200 text-xs outline-none focus:border-amber-500/50 transition-all"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-medium text-zinc-500">SMTP Host</label>
-                                        <input
-                                            type="text"
-                                            value={manualSmtpHost}
-                                            onChange={(e) => setManualSmtpHost(e.target.value)}
-                                            className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-zinc-200 text-xs outline-none focus:border-amber-500/50 transition-all"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-medium text-zinc-500">SMTP Port</label>
-                                        <input
-                                            type="text"
-                                            value={manualSmtpPort}
-                                            onChange={(e) => setManualSmtpPort(e.target.value)}
-                                            className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-zinc-200 text-xs outline-none focus:border-amber-500/50 transition-all"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleManualAdd}
-                                disabled={!manualPassword}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-semibold"
-                            >
-                                Add Account
-                            </button>
-
-                            <button
-                                onClick={() => setStep('email')}
-                                className="w-full text-xs text-zinc-600 hover:text-zinc-400 transition-colors py-1"
-                            >
-                                ← Back
-                            </button>
-                        </>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
+function getAvatarColor(name: string): string {
+    const colors = [
+        'bg-violet-500/20 text-violet-400', 'bg-blue-500/20 text-blue-400',
+        'bg-emerald-500/20 text-emerald-400', 'bg-amber-500/20 text-amber-400',
+        'bg-rose-500/20 text-rose-400', 'bg-cyan-500/20 text-cyan-400',
+        'bg-indigo-500/20 text-indigo-400',
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
 }
 
-// ─── Compose Modal ────────────────────────────────────────────────────────────
-
-function ComposeModal({
-    isOpen,
-    onClose,
-    onSend,
-    account,
-    replyTo,
-}: {
-    isOpen: boolean;
-    onClose: () => void;
-    onSend: (to: string[], cc: string[], subject: string, bodyHtml: string, bodyText: string, inReplyTo?: string, references?: string) => Promise<void>;
-    account: EmailAccount | null;
-    replyTo?: EmailHeader | null;
-}) {
-    const [to, setTo] = useState('');
-    const [cc, setCc] = useState('');
-    const [subject, setSubject] = useState('');
-    const [body, setBody] = useState('');
-    const [sending, setSending] = useState(false);
-    const [error, setError] = useState('');
-
-    useEffect(() => {
-        if (replyTo) {
-            setTo(replyTo.from.includes('<') ? replyTo.from : replyTo.from);
-            setSubject(replyTo.subject.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject}`);
-            setBody('');
-        } else {
-            setTo('');
-            setCc('');
-            setSubject('');
-            setBody('');
-        }
-    }, [replyTo, isOpen]);
-
-    const handleSend = async () => {
-        if (!to.trim()) {
-            setError('Please enter a recipient');
-            return;
-        }
-
-        setSending(true);
-        setError('');
-
-        try {
-            const toList = to.split(',').map(s => s.trim()).filter(Boolean);
-            const ccList = cc ? cc.split(',').map(s => s.trim()).filter(Boolean) : [];
-            const bodyHtml = `<div style="font-family: -apple-system, sans-serif; font-size: 14px; color: #333;">${body.replace(/\n/g, '<br/>')}</div>`;
-
-            await onSend(
-                toList,
-                ccList,
-                subject,
-                bodyHtml,
-                body,
-                replyTo?.message_id,
-                replyTo ? replyTo.references.concat(replyTo.message_id).join(' ') : undefined,
-            );
-
-            onClose();
-        } catch (err: any) {
-            setError(err.toString());
-        } finally {
-            setSending(false);
-        }
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 z-9999 flex items-end justify-center pb-6 bg-black/40 backdrop-blur-sm">
-            <div className="w-160 bg-zinc-900 border border-zinc-800/80 rounded-2xl shadow-2xl overflow-hidden" style={{ animation: 'slideUp 0.2s ease-out' }}>
-                <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50">
-                    <h3 className="text-sm font-bold text-zinc-100">{replyTo ? 'Reply' : 'New Message'}</h3>
-                    <div className="flex items-center gap-1">
-                        <button
-                            onClick={handleSend}
-                            disabled={sending || !to.trim()}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-xs font-semibold"
-                        >
-                            {sending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-                            Send
-                        </button>
-                        <button onClick={onClose} className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors">
-                            <X size={16} />
-                        </button>
-                    </div>
-                </div>
-
-                {error && (
-                    <div className="mx-4 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
-                        <AlertCircle size={12} />
-                        {error}
-                    </div>
-                )}
-
-                <div className="px-4 py-2 space-y-0">
-                    <div className="flex items-center border-b border-zinc-800/30 py-2">
-                        <span className="text-xs text-zinc-600 w-10">From</span>
-                        <span className="text-xs text-zinc-400">{account?.email || 'No account selected'}</span>
-                    </div>
-                    <div className="flex items-center border-b border-zinc-800/30 py-2">
-                        <span className="text-xs text-zinc-600 w-10">To</span>
-                        <input
-                            type="text"
-                            value={to}
-                            onChange={(e) => setTo(e.target.value)}
-                            className="flex-1 bg-transparent text-xs text-zinc-200 outline-none placeholder-zinc-600"
-                            placeholder="recipient@example.com"
-                            autoFocus={!replyTo}
-                        />
-                    </div>
-                    <div className="flex items-center border-b border-zinc-800/30 py-2">
-                        <span className="text-xs text-zinc-600 w-10">CC</span>
-                        <input
-                            type="text"
-                            value={cc}
-                            onChange={(e) => setCc(e.target.value)}
-                            className="flex-1 bg-transparent text-xs text-zinc-200 outline-none placeholder-zinc-600"
-                            placeholder="Optional"
-                        />
-                    </div>
-                    <div className="flex items-center border-b border-zinc-800/30 py-2">
-                        <span className="text-xs text-zinc-600 w-10">Subj</span>
-                        <input
-                            type="text"
-                            value={subject}
-                            onChange={(e) => setSubject(e.target.value)}
-                            className="flex-1 bg-transparent text-xs text-zinc-200 outline-none placeholder-zinc-600"
-                            placeholder="Subject"
-                        />
-                    </div>
-                </div>
-
-                <div className="px-4 py-3">
-                    <textarea
-                        value={body}
-                        onChange={(e) => setBody(e.target.value)}
-                        className="w-full h-48 bg-transparent text-sm text-zinc-200 outline-none resize-none placeholder-zinc-600 leading-relaxed"
-                        placeholder="Write your message..."
-                        autoFocus={!!replyTo}
-                    />
-                </div>
-            </div>
-        </div>
-    );
+function getInitials(name: string): string {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return (name[0] || '?').toUpperCase();
 }
 
-// ─── Main Email View ──────────────────────────────────────────────────────────
+/* ─── Main Component ─────────────────────────────────────────── */
 
 export default function EmailView() {
-    // ─── State ────────────────────────────────────────────────────────────
-    const [accounts, setAccounts] = useState<EmailAccount[]>([]);
+    const isTauri = IS_TAURI;
+
+    // Zustand store
+    const {
+        accounts, activeAccountId, unifiedInbox, activeFolder, activeCategory,
+        selectedEmailUid, selectedEmailBody, selectedIndex,
+        loading, loadingBody, refreshing, searchQuery,
+        draftQueue, replyToEmail, setupOpen,
+        setAccounts: storeSetAccounts, addAccount, removeAccount,
+        setActiveAccountId, setActiveFolder, setActiveCategory,
+        setUnifiedInbox, appendToInbox, setSelectedEmail, setSelectedEmailBody,
+        setSelectedSpamAnalysis, setSelectedIndex, setLoading, setLoadingBody,
+        setRefreshing, setSearchQuery, setReplyToEmail,
+        setSetupOpen, addDraft, removeDraft, getFilteredEmails, getActiveAccount,
+    } = useEmailStore();
+
+    // Local state
     const [accountsLoaded, setAccountsLoaded] = useState(false);
-
-    const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
-    const [activeFolder, setActiveFolder] = useState('INBOX');
-    const [headers, setHeaders] = useState<EmailHeader[]>([]);
-    const [selectedEmail, setSelectedEmail] = useState<EmailHeader | null>(null);
-    const [emailBody, setEmailBody] = useState<EmailBody | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [loadingBody, setLoadingBody] = useState(false);
-    const [setupOpen, setSetupOpen] = useState(false);
-    const [composeOpen, setComposeOpen] = useState(false);
-    const [replyToEmail, setReplyToEmail] = useState<EmailHeader | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [refreshing, setRefreshing] = useState(false);
-
+    const [foldersDiscovered, setFoldersDiscovered] = useState(false);
+    const [composerExpanded, setComposerExpanded] = useState(false);
     const [outlookToast, setOutlookToast] = useState<string | null>(null);
     const [outlookOpen, setOutlookOpen] = useState(false);
+    const [folderCtx, setFolderCtx] = useState<{ x: number; y: number; key: string } | null>(null);
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const isTauri = IS_TAURI;
-    const activeAccount = accounts.find(a => a.id === activeAccountId) || null;
+    const accountFoldersRef = useRef<Record<string, string[]>>({});
+    const fetchGenRef = useRef(0); // race-condition guard for folder switching
 
-    // ─── Listen for Outlook WebView events ─────────────────────────────
+    const activeAccount = getActiveAccount();
+    const storeFiltered = getFilteredEmails();
+    // Filter by active account (null = all accounts / unified)
+    const filteredEmails = activeAccountId
+        ? storeFiltered.filter(e => e.accountId === activeAccountId)
+        : storeFiltered;
+    const selectedEmail = unifiedInbox.find(e => e.uid === selectedEmailUid && (!activeAccountId || e.accountId === activeAccountId)) || null;
 
-    useEffect(() => {
-        if (!isTauri) return;
+    // ─── Category counts ────────────────────────────────────────
+    const categoryCounts = useMemo(() => {
+        const counts: Record<EmailCategory, number> = { all: 0, personal: 0, newsletters: 0, transactional: 0, spam: 0 };
+        for (const e of unifiedInbox) {
+            counts.all++;
+            const cat = e.category || categorizeEmail(e);
+            if (cat in counts) counts[cat]++;
+        }
+        return counts;
+    }, [unifiedInbox]);
 
-        const unlistenImport = listen<{ sender: string; subject: string; body: string }>(
-            'onyx-email-imported',
-            (event) => {
-                const { sender, subject } = event.payload;
-                setOutlookToast(`Imported: ${subject || '(no subject)'} from ${sender || 'unknown'}`);
-                setTimeout(() => setOutlookToast(null), 5000);
-            },
-        );
-
-        const unlistenOpened = listen('onyx-outlook-opened', () => setOutlookOpen(true));
-        const unlistenClosed = listen('onyx-outlook-closed', () => setOutlookOpen(false));
-
-        return () => {
-            unlistenImport.then(fn => fn());
-            unlistenOpened.then(fn => fn());
-            unlistenClosed.then(fn => fn());
-        };
-    }, [isTauri]);
-
-    // ─── Load accounts + encrypted credentials on mount ───────────────
+    // ─── Load accounts from localStorage on mount ────────────────
 
     useEffect(() => {
         (async () => {
             try {
                 const metaStr = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
                 if (!metaStr) { setAccountsLoaded(true); return; }
-
                 const meta: EmailAccount[] = JSON.parse(metaStr);
-
-                // Merge encrypted credentials (password, tokens)
                 const credsStr = localStorage.getItem(ACCOUNTS_CREDS_KEY);
                 if (credsStr) {
                     try {
@@ -937,40 +278,28 @@ export default function EmailView() {
                             const c = creds[a.id];
                             if (c) Object.assign(a, c);
                         }
-                    } catch (err) {
-                        console.warn('[Email] Could not decrypt credentials (key may have changed):', err);
-                    }
+                    } catch (err) { console.warn('[Email] Could not decrypt credentials:', err); }
                 }
-
-                setAccounts(meta);
-                if (meta.length > 0) setActiveAccountId(meta[0].id);
-            } catch (err) {
-                console.error('[Email] Failed to load accounts:', err);
-            }
+                storeSetAccounts(meta);
+                // Default to unified view if multiple accounts, else select the single account
+                if (meta.length > 1 && activeAccountId === undefined) setActiveAccountId(null);
+                else if (meta.length === 1 && !activeAccountId) setActiveAccountId(meta[0].id);
+            } catch (err) { console.error('[Email] Failed to load accounts:', err); }
             setAccountsLoaded(true);
         })();
     }, []);
 
-    // ─── Persist accounts + encrypted credentials ─────────────────────
+    // ─── Persist accounts (metadata + encrypted credentials) ─────
 
     useEffect(() => {
         if (!accountsLoaded) return;
-
-        // Save metadata (non-sensitive) — backward compatible
         const sanitized = accounts.map(a => ({
-            id: a.id,
-            email: a.email,
-            displayName: a.displayName,
-            provider: a.provider,
-            imapHost: a.imapHost,
-            imapPort: a.imapPort,
-            smtpHost: a.smtpHost,
-            smtpPort: a.smtpPort,
-            authMethod: a.authMethod,
+            id: a.id, email: a.email, displayName: a.displayName,
+            provider: a.provider, imapHost: a.imapHost, imapPort: a.imapPort,
+            smtpHost: a.smtpHost, smtpPort: a.smtpPort, authMethod: a.authMethod,
         }));
         localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(sanitized));
 
-        // Save credentials encrypted (AES-GCM with user key)
         const creds: Record<string, Record<string, string>> = {};
         for (const a of accounts) {
             const c: Record<string, string> = {};
@@ -982,36 +311,72 @@ export default function EmailView() {
         }
         encryptForStorage(JSON.stringify(creds)).then(encrypted => {
             localStorage.setItem(ACCOUNTS_CREDS_KEY, encrypted);
-        }).catch(err => {
-            console.error('[Email] Failed to encrypt credentials:', err);
-        });
+        }).catch(console.error);
     }, [accounts, accountsLoaded]);
 
-    // ─── Fetch emails ─────────────────────────────────────────────────────
+    // ─── Discover IMAP folders per account ───────────────────────
 
-    const fetchEmails = useCallback(async (accountId?: string, folder?: string) => {
-        const acct = accounts.find(a => a.id === (accountId || activeAccountId));
-        if (!acct) return;
+    useEffect(() => {
+        if (!isTauri || !accountsLoaded || accounts.length === 0) return;
+        setFoldersDiscovered(false);
+        const promises = accounts.map(async (acct) => {
+            if (accountFoldersRef.current[acct.id]) return;
+            try {
+                // Refresh OAuth token before IMAP folder discovery
+                if (acct.authMethod === 'oauth2') await ensureFreshToken(acct);
+                const folders = await invoke<string[]>('list_email_folders', {
+                    imapHost: acct.imapHost,
+                    imapPort: acct.imapPort,
+                    email: acct.email,
+                    authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
+                    accessToken: acct.accessToken || null,
+                    password: acct.password || null,
+                });
+                console.log(`[Email] Discovered folders for ${acct.email}:`, folders);
+                accountFoldersRef.current[acct.id] = folders;
+            } catch (err) {
+                console.warn(`[Email] Could not discover folders for ${acct.email}:`, err);
+            }
+        });
+        Promise.allSettled(promises).then(() => setFoldersDiscovered(true));
+    }, [accounts, accountsLoaded, isTauri]);
 
-        // Bug 1 guard: if this is an OAuth account without a token, do not fetch
-        if (acct.authMethod === 'oauth2' && !acct.accessToken) {
-            console.warn('[Email] Skipping fetch — no access token for OAuth account');
-            return;
-        }
+    // ─── Outlook WebView events ──────────────────────────────────
 
-        const targetFolder = folder || activeFolder;
-        setLoading(true);
+    useEffect(() => {
+        if (!isTauri) return;
+        const unlistenImport = listen<{ sender: string; subject: string; body: string }>('onyx-email-imported', (event) => {
+            setOutlookToast(`Imported: ${event.payload.subject || '(no subject)'}`);
+            setTimeout(() => setOutlookToast(null), 5000);
+        });
+        const unlistenOpened = listen('onyx-outlook-opened', () => setOutlookOpen(true));
+        const unlistenClosed = listen('onyx-outlook-closed', () => setOutlookOpen(false));
+        return () => {
+            unlistenImport.then(fn => fn());
+            unlistenOpened.then(fn => fn());
+            unlistenClosed.then(fn => fn());
+        };
+    }, [isTauri]);
+
+    // ─── Fetch emails (unified across ALL accounts) ──────────────
+
+    const fetchEmailsForAccount = useCallback(async (acct: EmailAccount, folder: string, gen: number) => {
+        if (!isTauri) return;
+
+        // Resolve canonical folder key to actual IMAP folder for this account
+        const sf = accountFoldersRef.current[acct.id] || [];
+        const resolvedFolder = sf.length > 0 ? resolveImapFolder(folder, sf) : folder;
+        if (!resolvedFolder) return; // folder doesn't exist for this account
 
         try {
-            const cached = await getCachedEmails(acct.id, targetFolder);
-            if (cached.length > 0) {
-                setHeaders(cached);
+            // Refresh OAuth token before IMAP call
+            if (acct.authMethod === 'oauth2') {
+                await ensureFreshToken(acct);
             }
+            if (acct.authMethod === 'oauth2' && !acct.accessToken) return;
 
-            if (!isTauri) {
-                setLoading(false);
-                return;
-            }
+            // Stale check after token refresh
+            if (fetchGenRef.current !== gen) return;
 
             const result = await invoke<EmailHeader[]>('fetch_email_headers', {
                 imapHost: acct.imapHost,
@@ -1020,155 +385,350 @@ export default function EmailView() {
                 authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
                 accessToken: acct.accessToken || null,
                 password: acct.password || null,
-                folder: targetFolder,
+                folder: resolvedFolder,
                 offset: 0,
                 limit: 50,
             });
 
-            setHeaders(result);
-            await cacheEmails(acct.id, targetFolder, result);
+            // Stale check after network call — only apply if this is still the active folder
+            if (fetchGenRef.current !== gen) return;
+
+            appendToInbox(result, acct.id);
+            await cacheEmails(acct.id, resolvedFolder, result);
         } catch (err) {
-            console.error('[Email] Fetch error:', err);
-        } finally {
-            setLoading(false);
+            console.error(`[Email] Fetch error for ${acct.email}:`, err);
         }
-    }, [accounts, activeAccountId, activeFolder, isTauri]);
+    }, [isTauri, appendToInbox]);
 
-    // ─── Fetch body for selected email ────────────────────────────────────
+    const fetchAllEmails = useCallback(async (folder?: string, showSpinner = false) => {
+        const targetFolder = folder || activeFolder;
+        const gen = ++fetchGenRef.current; // bump generation — stale fetches will bail out
 
-    const fetchBody = useCallback(async (uid: number) => {
-        if (!activeAccount || !isTauri) return;
+        if (showSpinner) setLoading(true);
 
-        // Guard: no token for OAuth → skip
-        if (activeAccount.authMethod === 'oauth2' && !activeAccount.accessToken) {
-            console.warn('[Email] Skipping body fetch — no access token');
-            return;
+        // Step 1: Clear inbox & immediately populate from cache (instant feel)
+        setUnifiedInbox([]);
+        const cachePromises = accounts.map(async (acct) => {
+            const sf = accountFoldersRef.current[acct.id] || [];
+            const resolved = sf.length > 0 ? resolveImapFolder(targetFolder, sf) : targetFolder;
+            if (!resolved) return;
+            const cached = await getCachedEmails(acct.id, resolved);
+            if (cached.length > 0 && fetchGenRef.current === gen) {
+                appendToInbox(cached, acct.id);
+            }
+        });
+        await Promise.allSettled(cachePromises);
+        if (fetchGenRef.current !== gen) { setLoading(false); return; }
+
+        // Step 2: Fetch fresh from network (replaces cache data as it arrives)
+        const promises = accounts.map(acct => fetchEmailsForAccount(acct, targetFolder, gen));
+        await Promise.allSettled(promises);
+
+        if (fetchGenRef.current === gen) setLoading(false);
+    }, [accounts, activeFolder, fetchEmailsForAccount, setLoading, appendToInbox, setUnifiedInbox]);
+
+    // ─── Fetch emails when folder changes or accounts load ───────
+
+    useEffect(() => {
+        if (accountsLoaded && accounts.length > 0 && foldersDiscovered) {
+            fetchAllEmails(undefined, false);
         }
+    }, [activeFolder, accountsLoaded, accounts.length, foldersDiscovered]);
+
+    // ─── Polling ─────────────────────────────────────────────────
+
+    useEffect(() => {
+        if (accounts.length === 0) return;
+        pollRef.current = setInterval(() => {
+            if (document.visibilityState === 'visible') fetchAllEmails();
+        }, POLL_INTERVAL);
+        return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    }, [accounts.length, fetchAllEmails]);
+
+    // ─── Fetch email body ────────────────────────────────────────
+
+    const fetchBody = useCallback(async (email: EmailHeader) => {
+        const acct = email.accountId
+            ? accounts.find(a => a.id === email.accountId)
+            : activeAccount;
+        if (!acct || !isTauri) return;
+
+        // Refresh OAuth token before IMAP call
+        if (acct.authMethod === 'oauth2') await ensureFreshToken(acct);
+        if (acct.authMethod === 'oauth2' && !acct.accessToken) return;
+
+        // Resolve folder for this account
+        const sf = accountFoldersRef.current[acct.id] || [];
+        const folder = sf.length > 0 ? (resolveImapFolder(activeFolder, sf) || activeFolder) : activeFolder;
 
         setLoadingBody(true);
         try {
             const result = await invoke<EmailBody>('fetch_email_body', {
-                imapHost: activeAccount.imapHost,
-                imapPort: activeAccount.imapPort,
-                email: activeAccount.email,
-                authMethod: activeAccount.authMethod === 'oauth2' ? 'oauth2' : 'password',
-                accessToken: activeAccount.accessToken || null,
-                password: activeAccount.password || null,
-                folder: activeFolder,
-                uid,
+                imapHost: acct.imapHost, imapPort: acct.imapPort,
+                email: acct.email,
+                authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
+                accessToken: acct.accessToken || null,
+                password: acct.password || null,
+                folder,
+                uid: email.uid,
             });
-            setEmailBody(result);
+            setSelectedEmailBody(result);
+
+            // Fetch spam analysis in background
+            invoke<SpamAnalysis>('fetch_spam_analysis', {
+                imapHost: acct.imapHost, imapPort: acct.imapPort,
+                email: acct.email,
+                authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
+                accessToken: acct.accessToken || null,
+                password: acct.password || null,
+                folder, uid: email.uid,
+            }).then(setSelectedSpamAnalysis).catch(() => {
+                setSelectedSpamAnalysis(null);
+            });
         } catch (err) {
             console.error('[Email] Body fetch error:', err);
         } finally {
             setLoadingBody(false);
         }
-    }, [activeAccount, activeFolder, isTauri]);
+    }, [accounts, activeAccount, activeFolder, isTauri]);
 
-    // ─── Load emails when account/folder changes ──────────────────────────
+    // ─── Email actions ───────────────────────────────────────────
 
-    useEffect(() => {
-        if (accountsLoaded && activeAccountId && activeFolder) {
-            fetchEmails(activeAccountId, activeFolder);
+    const handleMarkRead = useCallback(async (email: EmailHeader, toggleOff: boolean) => {
+        const acct = email.accountId
+            ? accounts.find(a => a.id === email.accountId)
+            : activeAccount;
+        if (!acct || !isTauri) return;
+
+        // Refresh OAuth token
+        if (acct.authMethod === 'oauth2') await ensureFreshToken(acct);
+
+        // Resolve folder for this account
+        const sf = accountFoldersRef.current[acct.id] || [];
+        const folder = sf.length > 0 ? (resolveImapFolder(activeFolder, sf) || activeFolder) : activeFolder;
+
+        try {
+            await invoke('mark_email_flag', {
+                imapHost: acct.imapHost, imapPort: acct.imapPort,
+                email: acct.email,
+                authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
+                accessToken: acct.accessToken || null,
+                password: acct.password || null,
+                folder, uid: email.uid,
+                flag: '\\Seen', add: !toggleOff,
+            });
+            // Update local state
+            setUnifiedInbox(unifiedInbox.map(e =>
+                (e.uid === email.uid && e.accountId === email.accountId)
+                    ? { ...e, is_read: !toggleOff }
+                    : e
+            ));
+        } catch (err) { console.error('[Email] Mark read error:', err); }
+    }, [accounts, activeAccount, activeFolder, isTauri, unifiedInbox]);
+
+    const handleSelectEmail = useCallback((email: EmailHeader, index: number) => {
+        setSelectedEmail(email.uid);
+        setSelectedIndex(index);
+        fetchBody(email);
+        // Auto-mark as read when opening
+        if (!email.is_read) {
+            handleMarkRead(email, false);
+        }
+    }, [setSelectedEmail, setSelectedIndex, fetchBody, handleMarkRead]);
+
+    const handleDelete = useCallback(async (email: EmailHeader) => {
+        const acct = email.accountId
+            ? accounts.find(a => a.id === email.accountId)
+            : activeAccount;
+        if (!acct || !isTauri) return;
+
+        // Refresh OAuth token
+        if (acct.authMethod === 'oauth2') await ensureFreshToken(acct);
+
+        // Resolve folder for this account
+        const sf = accountFoldersRef.current[acct.id] || [];
+        const folder = sf.length > 0 ? (resolveImapFolder(activeFolder, sf) || activeFolder) : activeFolder;
+
+        try {
+            await invoke('delete_email', {
+                imapHost: acct.imapHost, imapPort: acct.imapPort,
+                email: acct.email,
+                authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
+                accessToken: acct.accessToken || null,
+                password: acct.password || null,
+                folder, uid: email.uid,
+            });
+            setUnifiedInbox(unifiedInbox.filter(e => !(e.uid === email.uid && e.accountId === email.accountId)));
             setSelectedEmail(null);
-            setEmailBody(null);
-        }
-    }, [activeAccountId, activeFolder, accountsLoaded]);
+        } catch (err) { console.error('[Email] Delete error:', err); }
+    }, [accounts, activeAccount, activeFolder, isTauri, unifiedInbox]);
 
-    // ─── Polling (every 60s when in foreground) ───────────────────────────
+    const handleArchive = useCallback(async (email: EmailHeader) => {
+        const acct = email.accountId
+            ? accounts.find(a => a.id === email.accountId)
+            : activeAccount;
+        if (!acct || !isTauri) return;
 
-    useEffect(() => {
-        if (!activeAccountId || accounts.length === 0) return;
+        // Refresh OAuth token
+        if (acct.authMethod === 'oauth2') await ensureFreshToken(acct);
 
-        pollRef.current = setInterval(() => {
-            if (document.visibilityState === 'visible') {
-                fetchEmails();
-            }
-        }, POLL_INTERVAL);
+        // Resolve archive folder dynamically using server's actual folders
+        const sf = accountFoldersRef.current[acct.id] || [];
+        const archiveFolder = sf.length > 0
+            ? resolveImapFolder('Archive', sf)
+            : (acct.provider === 'Gmail' ? '[Gmail]/All Mail' : 'Archive');
+        if (!archiveFolder) return;
 
-        return () => {
-            if (pollRef.current) clearInterval(pollRef.current);
-        };
-    }, [activeAccountId, fetchEmails]);
+        // Resolve current folder
+        const folder = sf.length > 0 ? (resolveImapFolder(activeFolder, sf) || activeFolder) : activeFolder;
 
-    // ─── Handle send ──────────────────────────────────────────────────────
+        try {
+            await invoke('move_email', {
+                imapHost: acct.imapHost, imapPort: acct.imapPort,
+                email: acct.email,
+                authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
+                accessToken: acct.accessToken || null,
+                password: acct.password || null,
+                folder, uid: email.uid,
+                targetFolder: archiveFolder,
+            });
+            setUnifiedInbox(unifiedInbox.filter(e => !(e.uid === email.uid && e.accountId === email.accountId)));
+            setSelectedEmail(null);
+        } catch (err) { console.error('[Email] Archive error:', err); }
+    }, [accounts, activeAccount, activeFolder, isTauri, unifiedInbox]);
 
-    const handleSendEmail = useCallback(async (
-        to: string[],
-        cc: string[],
-        subject: string,
-        bodyHtml: string,
-        bodyText: string,
-        inReplyTo?: string,
-        references?: string,
-    ) => {
-        if (!activeAccount || !isTauri) throw new Error('No active account');
-
-        // Guard: no token for OAuth send
-        if (activeAccount.authMethod === 'oauth2' && !activeAccount.accessToken) {
-            throw new Error('No access token — please sign in again');
-        }
-
-        await invoke('send_email', {
-            smtpHost: activeAccount.smtpHost,
-            smtpPort: activeAccount.smtpPort,
-            fromEmail: activeAccount.email,
-            fromName: activeAccount.displayName,
-            authMethod: activeAccount.authMethod === 'oauth2' ? 'oauth2' : 'password',
-            accessToken: activeAccount.accessToken || null,
-            password: activeAccount.password || null,
-            to,
-            cc,
-            subject,
-            bodyHtml,
-            bodyText,
-            inReplyTo: inReplyTo || null,
-            referencesHeader: references || null,
-        });
-    }, [activeAccount, isTauri]);
-
-    // ─── Handle account added ─────────────────────────────────────────────
-
-    const handleAccountAdded = useCallback((account: EmailAccount) => {
-        setAccounts(prev => [...prev, account]);
-        setActiveAccountId(account.id);
+    const handleReply = useCallback((email: EmailHeader) => {
+        setReplyToEmail(email);
+        setComposerExpanded(true);
     }, []);
 
-    const handleRemoveAccount = useCallback((id: string) => {
-        setAccounts(prev => prev.filter(a => a.id !== id));
-        if (activeAccountId === id) {
-            const remaining = accounts.filter(a => a.id !== id);
-            setActiveAccountId(remaining[0]?.id || null);
-        }
-        // Clean up cached emails for this account
-        for (let i = localStorage.length - 1; i >= 0; i--) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith(`${EMAIL_CACHE_KEY}-${id}-`)) {
-                localStorage.removeItem(key);
-            }
-        }
-    }, [accounts, activeAccountId]);
-
-    // ─── Refresh handler ──────────────────────────────────────────────────
+    const handleForward = useCallback((_email: EmailHeader) => {
+        setReplyToEmail(null);
+        setComposerExpanded(true);
+    }, []);
 
     const handleRefresh = useCallback(async () => {
         setRefreshing(true);
-        await fetchEmails();
+        await fetchAllEmails();
         setRefreshing(false);
-    }, [fetchEmails]);
+    }, [fetchAllEmails]);
 
-    // ─── Filter emails by search ──────────────────────────────────────────
+    const handleQueueSend = useCallback((draft: QueuedDraft) => {
+        addDraft(draft);
+        setComposerExpanded(false);
+        setReplyToEmail(null);
+    }, [addDraft]);
 
-    const filteredHeaders = searchQuery
-        ? headers.filter(h =>
-            h.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            h.from.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-        : headers;
+    const handleAccountAdded = useCallback((account: EmailAccount) => {
+        addAccount(account);
+        // Immediately fetch for the new account
+        fetchEmailsForAccount(account, activeFolder, fetchGenRef.current);
+    }, [addAccount, fetchEmailsForAccount, activeFolder]);
 
-    // ─── No accounts — empty state ────────────────────────────────────────
+    const handleRemoveAccount = useCallback((id: string) => {
+        removeAccount(id);
+        // Clean cache
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(`${EMAIL_CACHE_KEY}-${id}-`)) localStorage.removeItem(key);
+        }
+    }, [removeAccount]);
 
-    if (accounts.length === 0) {
+    // ─── Keyboard shortcuts ──────────────────────────────────────
+
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            // Don't handle shortcuts when typing in inputs
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
+            const emails = filteredEmails;
+
+            switch (e.key.toLowerCase()) {
+                case 'j': {
+                    // Next email
+                    e.preventDefault();
+                    const next = Math.min(selectedIndex + 1, emails.length - 1);
+                    if (next >= 0 && next < emails.length) {
+                        handleSelectEmail(emails[next], next);
+                    }
+                    break;
+                }
+                case 'k': {
+                    // Previous email
+                    e.preventDefault();
+                    const prev = Math.max(selectedIndex - 1, 0);
+                    if (prev >= 0 && prev < emails.length) {
+                        handleSelectEmail(emails[prev], prev);
+                    }
+                    break;
+                }
+                case 'c': {
+                    // Compose
+                    e.preventDefault();
+                    setReplyToEmail(null);
+                    setComposerExpanded(true);
+                    break;
+                }
+                case 'r': {
+                    // Reply
+                    if (selectedEmail) {
+                        e.preventDefault();
+                        handleReply(selectedEmail);
+                    }
+                    break;
+                }
+                case 'e': {
+                    // Archive
+                    if (selectedEmail) {
+                        e.preventDefault();
+                        handleArchive(selectedEmail);
+                    }
+                    break;
+                }
+                case '#': {
+                    // Delete
+                    if (selectedEmail) {
+                        e.preventDefault();
+                        handleDelete(selectedEmail);
+                    }
+                    break;
+                }
+                case '/': {
+                    // Focus search
+                    e.preventDefault();
+                    const searchInput = document.querySelector('[data-email-search]') as HTMLInputElement;
+                    searchInput?.focus();
+                    break;
+                }
+                case 'escape': {
+                    if (composerExpanded) {
+                        setComposerExpanded(false);
+                    } else if (selectedEmail) {
+                        setSelectedEmail(null);
+                    }
+                    break;
+                }
+                // Vim-style: G = go to bottom, g = go to top (gg)
+                case 'g': {
+                    if (e.shiftKey) {
+                        // G = last email
+                        e.preventDefault();
+                        const last = emails.length - 1;
+                        if (last >= 0) handleSelectEmail(emails[last], last);
+                    }
+                    break;
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [filteredEmails, selectedIndex, selectedEmail, composerExpanded, handleSelectEmail, handleReply, handleArchive, handleDelete]);
+
+    // ─── No accounts — empty state ───────────────────────────────
+
+    if (accountsLoaded && accounts.length === 0) {
         return (
             <>
                 <div className="flex-1 flex items-center justify-center bg-zinc-950/50">
@@ -1182,29 +742,32 @@ export default function EmailView() {
                                 Connect your Gmail, Outlook, or any IMAP mailbox. All data stays on your device — encrypted with your Onyx key.
                             </p>
                         </div>
-                        <button
-                            onClick={() => setSetupOpen(true)}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors text-sm font-semibold"
-                        >
-                            <Plus size={16} />
-                            Add Email Account
-                        </button>
-                        {isTauri && (
+                        <div className="space-y-2">
                             <button
-                                onClick={() => {
-                                    const realm = activeAccount ? getOutlookRealm(activeAccount.email) : null;
-                                    invoke('open_outlook_onyx', { realm }).catch(e => console.error('[Outlook WebView]', e));
-                                }}
-                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors text-xs font-medium"
+                                onClick={() => setSetupOpen(true)}
+                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors text-sm font-semibold"
                             >
-                                <ExternalLink size={14} />
-                                Open Outlook in Onyx
+                                <Plus size={16} /> Add Email Account
                             </button>
-                        )}
+                            {isTauri && (
+                                <button
+                                    onClick={() => invoke('open_outlook_onyx', { realm: null as string | null }).catch(console.error)}
+                                    className="block mx-auto items-center gap-2 px-4 py-2 rounded-xl bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors text-xs font-medium"
+                                >
+                                    <ExternalLink size={14} className="inline mr-1" />
+                                    Open Outlook in Onyx
+                                </button>
+                            )}
+                        </div>
+                        {/* Keyboard shortcut hint */}
+                        <div className="pt-4">
+                            <div className="text-[10px] text-zinc-700 space-y-0.5">
+                                <div><kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono text-[9px]">J/K</kbd> navigate · <kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono text-[9px]">C</kbd> compose · <kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono text-[9px]">/</kbd> search</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-
-                <AccountSetupModal
+                <AccountSetup
                     isOpen={setupOpen}
                     onClose={() => setSetupOpen(false)}
                     onAccountAdded={handleAccountAdded}
@@ -1213,28 +776,46 @@ export default function EmailView() {
         );
     }
 
-    // ─── Main 3-Panel Layout ──────────────────────────────────────────────
+    // ─── Main 3-Panel Layout ─────────────────────────────────────
 
     return (
         <div className="flex h-full overflow-hidden">
-            {/* Left Panel: Accounts + Folders */}
-            <div className="w-56 h-full flex flex-col bg-zinc-900/60 border-r border-zinc-800/30 shrink-0">
+            {/* ─── Left Panel: Accounts + Folders ─────────────────── */}
+            <div className="w-52 h-full flex flex-col bg-zinc-900/60 border-r border-zinc-800/30 shrink-0">
                 {/* Compose button */}
                 <div className="p-3 shrink-0">
                     <button
-                        onClick={() => { setReplyToEmail(null); setComposeOpen(true); }}
+                        onClick={() => { setReplyToEmail(null); setComposerExpanded(true); }}
                         className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/15 text-amber-400 hover:bg-amber-500/20 transition-colors text-sm font-semibold"
                     >
-                        <MailPlus size={16} />
-                        Compose
+                        <MailPlus size={16} /> Compose
                     </button>
                 </div>
 
                 {/* Account list */}
                 <div className="px-2 pb-2">
                     <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider px-2 py-1">
-                        Accounts
+                        Accounts ({accounts.length})
                     </div>
+                    {/* Unified / All accounts */}
+                    {accounts.length > 1 && (
+                        <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setActiveAccountId(null)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveAccountId(null); }}
+                            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-colors cursor-pointer ${
+                                activeAccountId === null
+                                    ? 'bg-amber-500/10 text-zinc-200'
+                                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
+                            }`}
+                        >
+                            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-linear-to-br from-amber-500/20 to-violet-500/20 text-amber-400">
+                                <Inbox size={12} />
+                            </div>
+                            <span className="truncate flex-1 text-left">All accounts</span>
+                        </div>
+                    )}
                     {accounts.map(account => (
                         <div
                             key={account.id}
@@ -1249,7 +830,9 @@ export default function EmailView() {
                             }`}
                         >
                             <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${getAvatarColor(account.email)}`}>
-                                {account.provider === 'Gmail' ? '📧' : account.provider === 'Microsoft' ? '📬' : getInitials(account.email)}
+                                {account.provider === 'Custom'
+                                    ? getInitials(account.email)
+                                    : <ProviderIcon provider={account.provider} className="w-3.5 h-3.5" />}
                             </div>
                             <span className="truncate flex-1 text-left">{account.email}</span>
                             <button
@@ -1264,8 +847,7 @@ export default function EmailView() {
                         onClick={() => setSetupOpen(true)}
                         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/30 transition-colors mt-0.5"
                     >
-                        <Plus size={12} />
-                        Add account
+                        <Plus size={12} /> Add account
                     </button>
                 </div>
 
@@ -1273,204 +855,119 @@ export default function EmailView() {
 
                 {/* Folders */}
                 <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-                    {DEFAULT_FOLDERS.map(folder => {
-                        const isActive = activeFolder === folder.imapName;
+                    {CANONICAL_FOLDERS.map(folder => {
+                        const isActive = activeFolder === folder.key;
                         return (
                             <button
-                                key={folder.label}
-                                onClick={() => setActiveFolder(folder.imapName)}
+                                key={folder.key}
+                                onClick={() => setActiveFolder(folder.key)}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setFolderCtx({ x: e.clientX, y: e.clientY, key: folder.key });
+                                }}
                                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                                     isActive
                                         ? 'bg-zinc-800/60 text-zinc-100'
                                         : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
                                 }`}
                             >
-                                <folder.icon
-                                    size={16}
-                                    className={isActive ? 'text-amber-400' : 'text-zinc-600'}
-                                />
+                                <folder.icon size={16} className={isActive ? 'text-amber-400' : 'text-zinc-600'} />
                                 <span className="flex-1 text-left truncate">{folder.label}</span>
                             </button>
                         );
                     })}
                 </div>
+
+                {/* Outbox (draft queue) */}
+                {draftQueue.length > 0 && (
+                    <div className="px-2 pb-2">
+                        <div className="px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/10">
+                            <div className="flex items-center gap-2 text-[11px] text-amber-400 font-semibold">
+                                <Clock size={12} />
+                                Outbox ({draftQueue.length})
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Keyboard hints */}
+                <div className="px-3 pb-3 shrink-0">
+                    <div className="text-[9px] text-zinc-700 space-y-0.5">
+                        <div><kbd className="px-1 rounded bg-zinc-800/50 font-mono">J</kbd>/<kbd className="px-1 rounded bg-zinc-800/50 font-mono">K</kbd> nav · <kbd className="px-1 rounded bg-zinc-800/50 font-mono">C</kbd> compose</div>
+                        <div><kbd className="px-1 rounded bg-zinc-800/50 font-mono">R</kbd> reply · <kbd className="px-1 rounded bg-zinc-800/50 font-mono">E</kbd> archive · <kbd className="px-1 rounded bg-zinc-800/50 font-mono">/</kbd> search</div>
+                    </div>
+                </div>
             </div>
 
-            {/* Center Panel: Email List */}
+            {/* ─── Center Panel: Category Tabs + Email List ────────── */}
             <div className="w-80 bg-zinc-900/30 flex flex-col border-r border-zinc-800/30 shrink-0">
                 {/* Search + Refresh */}
-                <div className="p-3 border-b border-zinc-800/30 shrink-0 space-y-2">
+                <div className="p-3 border-b border-zinc-800/30 shrink-0">
                     <div className="flex items-center gap-2">
                         <div className="flex-1 flex items-center gap-2 bg-zinc-800/30 rounded-lg px-3 py-2 border border-zinc-700/20">
                             <Search size={14} className="text-zinc-600" />
                             <input
                                 type="text"
+                                data-email-search
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Search emails..."
+                                placeholder="Search emails... (/)"
                                 className="flex-1 bg-transparent text-sm text-zinc-300 placeholder-zinc-600 outline-none"
                             />
+                            {searchQuery && (
+                                <button onClick={() => setSearchQuery('')} className="text-zinc-600 hover:text-zinc-400">
+                                    <X size={12} />
+                                </button>
+                            )}
                         </div>
                         <button
                             onClick={handleRefresh}
                             disabled={refreshing}
                             className="p-2 rounded-lg hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 transition-colors"
+                            title="Refresh all accounts"
                         >
                             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
                         </button>
                     </div>
                 </div>
 
-                {/* Loading indicator */}
-                {loading && headers.length === 0 && (
-                    <div className="flex items-center justify-center py-8">
-                        <Loader2 size={20} className="animate-spin text-zinc-600" />
-                    </div>
-                )}
+                {/* Category tabs */}
+                <InboxTabs
+                    active={activeCategory}
+                    onChange={setActiveCategory}
+                    counts={categoryCounts}
+                />
 
-                {/* Email items */}
-                <div className="flex-1 overflow-y-auto">
-                    {filteredHeaders.length === 0 && !loading && (
-                        <div className="flex flex-col items-center justify-center py-12 text-zinc-600">
-                            <Inbox size={24} className="mb-2 text-zinc-700" />
-                            <span className="text-sm">No emails</span>
-                        </div>
-                    )}
-
-                    {filteredHeaders.map((email) => {
-                        const isSelected = selectedEmail?.uid === email.uid;
-                        return (
-                            <div
-                                key={email.uid}
-                                onClick={() => {
-                                    setSelectedEmail(email);
-                                    setEmailBody(null);
-                                    fetchBody(email.uid);
-                                }}
-                                className={`px-4 py-3 border-b border-zinc-800/20 cursor-pointer transition-colors ${
-                                    isSelected
-                                        ? 'bg-amber-500/5 border-l-2 border-l-amber-400'
-                                        : 'hover:bg-zinc-800/20 border-l-2 border-l-transparent'
-                                }`}
-                            >
-                                <div className="flex items-center gap-2.5 mb-0.5">
-                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${getAvatarColor(email.from)}`}>
-                                        {getInitials(email.from)}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between">
-                                            <span className={`text-sm truncate ${email.is_read ? 'text-zinc-400' : 'font-semibold text-zinc-100'}`}>
-                                                {email.from}
-                                            </span>
-                                            <span className="text-[10px] text-zinc-600 shrink-0 ml-2">
-                                                {formatRelativeDate(email.date)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="pl-9.5">
-                                    <div className="flex items-center gap-1.5">
-                                        {!email.is_read && (
-                                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                                        )}
-                                        <span className={`text-sm truncate ${email.is_read ? 'text-zinc-500' : 'text-zinc-300'}`}>
-                                            {email.subject || '(No subject)'}
-                                        </span>
-                                        {email.has_attachments && <Paperclip size={11} className="text-zinc-600 shrink-0" />}
-                                    </div>
-                                    {email.preview && (
-                                        <p className="text-xs text-zinc-600 truncate mt-0.5">{email.preview}</p>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
+                {/* Thread list */}
+                <ThreadList
+                    emails={filteredEmails}
+                    loading={loading}
+                    selectedUid={selectedEmailUid}
+                    selectedIndex={selectedIndex}
+                    onSelectEmail={handleSelectEmail}
+                    showCategoryBadge={activeCategory === 'all'}
+                    onDelete={handleDelete}
+                    onArchive={handleArchive}
+                    onMarkRead={handleMarkRead}
+                    onReply={handleReply}
+                />
             </div>
 
-            {/* Right Panel: Reading Pane */}
-            <div className="flex-1 flex flex-col bg-zinc-950/50 overflow-hidden">
+            {/* ─── Right Panel: Email Viewer + Mini Composer ──────── */}
+            <div className="flex-1 flex flex-col overflow-hidden">
                 {selectedEmail ? (
-                    <>
-                        {/* Email header bar */}
-                        <div className="shrink-0 px-6 py-4 border-b border-zinc-800/30">
-                            <div className="flex items-center justify-between mb-3">
-                                <button
-                                    onClick={() => { setSelectedEmail(null); setEmailBody(null); }}
-                                    className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors md:hidden"
-                                >
-                                    <ChevronLeft size={18} />
-                                </button>
-                                <div className="flex items-center gap-1">
-                                    <button
-                                        onClick={() => { setReplyToEmail(selectedEmail); setComposeOpen(true); }}
-                                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 transition-colors text-xs"
-                                    >
-                                        <Reply size={14} />
-                                        Reply
-                                    </button>
-                                    <button
-                                        onClick={() => { setReplyToEmail(selectedEmail); setComposeOpen(true); }}
-                                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 transition-colors text-xs"
-                                    >
-                                        <ReplyAll size={14} />
-                                        Reply All
-                                    </button>
-                                    <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 transition-colors text-xs">
-                                        <Forward size={14} />
-                                        Forward
-                                    </button>
-                                </div>
-                            </div>
-
-                            <h2 className="text-lg font-bold text-zinc-100 mb-2">
-                                {selectedEmail.subject || '(No subject)'}
-                            </h2>
-
-                            <div className="flex items-center gap-3">
-                                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${getAvatarColor(selectedEmail.from)}`}>
-                                    {getInitials(selectedEmail.from)}
-                                </div>
-                                <div>
-                                    <div className="text-sm font-medium text-zinc-200">{selectedEmail.from}</div>
-                                    <div className="text-xs text-zinc-600">
-                                        To: {selectedEmail.to} · {formatRelativeDate(selectedEmail.date)}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Email body */}
-                        <div className="flex-1 overflow-y-auto px-6 py-4">
-                            {loadingBody && (
-                                <div className="flex items-center justify-center py-12">
-                                    <Loader2 size={20} className="animate-spin text-zinc-600" />
-                                </div>
-                            )}
-
-                            {emailBody && emailBody.html && (
-                                <div className="email-body-html" style={{ color: '#e4e4e7', lineHeight: 1.7, fontSize: '14px' }}>
-                                    <iframe
-                                        sandbox="allow-same-origin"
-                                        className="w-full border-none bg-white rounded-lg"
-                                        style={{ minHeight: 400 }}
-                                        srcDoc={`<!DOCTYPE html><html><head><style>body{font-family:-apple-system,sans-serif;font-size:14px;color:#333;padding:16px;margin:0;line-height:1.6}img{max-width:100%;height:auto}a{color:#2563eb}blockquote{border-left:3px solid #d4d4d8;padding-left:12px;margin-left:0;color:#71717a}</style></head><body>${emailBody.html}</body></html>`}
-                                    />
-                                </div>
-                            )}
-
-                            {emailBody && !emailBody.html && emailBody.text && (
-                                <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-[inherit] leading-relaxed">
-                                    {emailBody.text}
-                                </pre>
-                            )}
-
-                            {emailBody && !emailBody.html && !emailBody.text && (
-                                <div className="text-sm text-zinc-600 italic">No content available</div>
-                            )}
-                        </div>
-                    </>
+                    <EmailViewer
+                        email={selectedEmail}
+                        body={selectedEmailBody}
+                        loadingBody={loadingBody}
+                        onBack={() => setSelectedEmail(null)}
+                        onReply={handleReply}
+                        onReplyAll={handleReply}
+                        onForward={handleForward}
+                        onDelete={handleDelete}
+                        onArchive={handleArchive}
+                        onMarkRead={handleMarkRead}
+                    />
                 ) : outlookOpen ? (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="text-center space-y-3 max-w-xs">
@@ -1479,7 +976,7 @@ export default function EmailView() {
                             </div>
                             <h3 className="text-base font-bold text-zinc-100">Outlook is open</h3>
                             <p className="text-xs text-zinc-500 leading-relaxed">
-                                Outlook Web is running in an Onyx window. Use the purple toolbar in that window to import emails to your notes.
+                                Outlook Web is running in an Onyx window. Use the toolbar to import emails.
                             </p>
                             <button
                                 onClick={() => invoke('close_outlook_onyx').catch(() => {})}
@@ -1491,43 +988,118 @@ export default function EmailView() {
                     </div>
                 ) : (
                     <div className="flex-1 flex items-center justify-center">
-                        <div className="text-center space-y-2">
-                            <Inbox size={28} className="text-zinc-700 mx-auto" />
+                        <div className="text-center space-y-3">
+                            <Inbox size={32} className="text-zinc-700 mx-auto" />
                             <p className="text-sm text-zinc-600">Select an email to read</p>
+                            <p className="text-[10px] text-zinc-700">
+                                Press <kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-500 font-mono">J</kbd> to navigate down
+                            </p>
                         </div>
                     </div>
                 )}
+
+                {/* Mini composer — always at bottom, independent of email selection */}
+                <MiniComposer
+                    account={activeAccount || accounts[0] || null}
+                    accounts={accounts}
+                    replyTo={replyToEmail}
+                    expanded={composerExpanded}
+                    onToggleExpand={() => setComposerExpanded(!composerExpanded)}
+                    onClose={() => { setComposerExpanded(false); setReplyToEmail(null); }}
+                    onQueueSend={handleQueueSend}
+                />
             </div>
 
-            {/* Modals */}
-            <AccountSetupModal
+            {/* ─── Modals + Overlays ──────────────────────────────── */}
+            <AccountSetup
                 isOpen={setupOpen}
                 onClose={() => setSetupOpen(false)}
                 onAccountAdded={handleAccountAdded}
             />
 
-            <ComposeModal
-                isOpen={composeOpen}
-                onClose={() => { setComposeOpen(false); setReplyToEmail(null); }}
-                onSend={handleSendEmail}
-                account={activeAccount}
-                replyTo={replyToEmail}
+            {/* Undo send toasts */}
+            <UndoToast
+                drafts={draftQueue}
+                accounts={accounts}
+                onCancel={(id) => removeDraft(id)}
+                onSent={(id) => removeDraft(id)}
             />
 
-            {/* Outlook WebView import toast */}
+            {/* Outlook import toast */}
             {outlookToast && (
                 <div
-                    className="fixed bottom-6 right-6 z-99999 flex items-center gap-3 px-5 py-3 rounded-xl shadow-2xl text-sm font-medium text-white"
+                    className="fixed bottom-6 left-6 z-99999 flex items-center gap-3 px-5 py-3 rounded-xl shadow-2xl text-sm font-medium text-white"
                     style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', boxShadow: '0 8px 32px rgba(139,92,246,0.4)' }}
                 >
                     <span>✨ {outlookToast}</span>
-                    <button
-                        onClick={() => setOutlookToast(null)}
-                        className="ml-2 p-0.5 rounded hover:bg-white/20 transition-colors"
-                    >
+                    <button onClick={() => setOutlookToast(null)} className="ml-2 p-0.5 rounded hover:bg-white/20 transition-colors">
                         <X size={14} />
                     </button>
                 </div>
+            )}
+
+            {/* Folder context menu */}
+            {folderCtx && (
+                <ContextMenu
+                    x={folderCtx.x}
+                    y={folderCtx.y}
+                    onClose={() => setFolderCtx(null)}
+                    items={[
+                        {
+                            label: 'Mark all as read',
+                            icon: <MailOpen size={13} />,
+                            onClick: () => {
+                                const folderEmails = unifiedInbox.filter(e => {
+                                    // In unified mode, check all; otherwise check active account
+                                    if (activeAccountId && e.accountId !== activeAccountId) return false;
+                                    return !e.is_read;
+                                });
+                                // Mark each unread email as read
+                                folderEmails.forEach(e => handleMarkRead(e, false));
+                            },
+                        },
+                        {
+                            label: 'Refresh',
+                            icon: <RefreshCw size={13} />,
+                            onClick: () => fetchAllEmails(folderCtx.key, true),
+                        },
+                        ...(folderCtx.key === 'Trash' ? [{
+                            label: 'Empty Trash',
+                            icon: <Trash2 size={13} />,
+                            onClick: async () => {
+                                // Optimistic: remove all from UI instantly
+                                const trashEmails = [...unifiedInbox];
+                                setUnifiedInbox([]);
+                                setSelectedEmail(null);
+
+                                // Batch delete per account in background (one IMAP session per account)
+                                const byAccount = new Map<string, { acct: EmailAccount; uids: number[] }>();
+                                for (const e of trashEmails) {
+                                    const acctId = e.accountId || activeAccountId;
+                                    if (!acctId) continue;
+                                    if (!byAccount.has(acctId)) {
+                                        const acct = accounts.find(a => a.id === acctId);
+                                        if (acct) byAccount.set(acctId, { acct, uids: [] });
+                                    }
+                                    byAccount.get(acctId)?.uids.push(e.uid);
+                                }
+                                for (const { acct, uids } of byAccount.values()) {
+                                    if (acct.authMethod === 'oauth2') await ensureFreshToken(acct);
+                                    const sf = accountFoldersRef.current[acct.id] || [];
+                                    const folder = sf.length > 0 ? (resolveImapFolder('Trash', sf) || 'Trash') : 'Trash';
+                                    invoke('batch_delete_emails', {
+                                        imapHost: acct.imapHost, imapPort: acct.imapPort,
+                                        email: acct.email,
+                                        authMethod: acct.authMethod === 'oauth2' ? 'oauth2' : 'password',
+                                        accessToken: acct.accessToken || null,
+                                        password: acct.password || null,
+                                        folder, uids,
+                                    }).catch(err => console.error('[Email] Batch delete error:', err));
+                                }
+                            },
+                        }] : []),
+                    ] as ContextMenuItem[]}
+                />
             )}
         </div>
     );

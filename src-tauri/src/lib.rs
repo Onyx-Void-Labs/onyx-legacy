@@ -170,6 +170,85 @@ mod outlook_stubs {
     ) -> Result<Vec<EmailFolder>, String> {
         Err("Email client is not available on mobile".to_string())
     }
+
+    #[tauri::command]
+    pub async fn move_email(
+        _imap_host: String, _imap_port: u16, _email: String, _auth_method: String,
+        _access_token: Option<String>, _password: Option<String>,
+        _folder: String, _uid: u32, _target_folder: String,
+    ) -> Result<(), String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn delete_email(
+        _imap_host: String, _imap_port: u16, _email: String, _auth_method: String,
+        _access_token: Option<String>, _password: Option<String>,
+        _folder: String, _uid: u32,
+    ) -> Result<(), String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn batch_delete_emails(
+        _imap_host: String, _imap_port: u16, _email: String, _auth_method: String,
+        _access_token: Option<String>, _password: Option<String>,
+        _folder: String, _uids: Vec<u32>,
+    ) -> Result<(), String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn mark_email_flag(
+        _imap_host: String, _imap_port: u16, _email: String, _auth_method: String,
+        _access_token: Option<String>, _password: Option<String>,
+        _folder: String, _uid: u32, _flag: String, _add: bool,
+    ) -> Result<(), String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct SpamAnalysis {
+        pub score: f64,
+        pub is_spam: bool,
+        pub reasons: Vec<SpamReason>,
+        pub spf_pass: bool,
+        pub dkim_pass: bool,
+        pub dmarc_pass: bool,
+        pub has_unsubscribe: bool,
+        pub unsubscribe_url: Option<String>,
+        pub list_unsubscribe: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct SpamReason {
+        pub name: String,
+        pub score: f64,
+        pub description: String,
+    }
+
+    #[tauri::command]
+    pub async fn fetch_spam_analysis(
+        _imap_host: String, _imap_port: u16, _email: String, _auth_method: String,
+        _access_token: Option<String>, _password: Option<String>,
+        _folder: String, _uid: u32,
+    ) -> Result<SpamAnalysis, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub async fn search_emails(
+        _imap_host: String, _imap_port: u16, _email: String, _auth_method: String,
+        _access_token: Option<String>, _password: Option<String>,
+        _folder: String, _query: String,
+    ) -> Result<Vec<u32>, String> {
+        Err("Email client is not available on mobile".to_string())
+    }
+
+    #[tauri::command]
+    pub fn sanitize_email_html(_html: String, _dark_mode: bool) -> String {
+        String::new()
+    }
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -254,6 +333,13 @@ pub fn run() {
             fetch_email_body,
             send_email,
             list_email_folders,
+            move_email,
+            delete_email,
+            batch_delete_emails,
+            mark_email_flag,
+            fetch_spam_analysis,
+            search_emails,
+            sanitize_email_html,
             // Outlook WebView commands (stubs on Android)
             open_outlook_onyx,
             close_outlook_onyx,

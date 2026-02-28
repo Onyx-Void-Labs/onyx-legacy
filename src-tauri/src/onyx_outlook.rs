@@ -50,60 +50,67 @@ pub struct ImportedEmail {
 /// - Console forwarding for full dev-tools visibility.
 /// - Zero scraping — user explicitly triggers any data import.
 #[tauri::command]
-pub fn open_outlook_onyx(app: AppHandle, realm: Option<String>) -> Result<(), String> {
-    // If the embedded webview already exists, just bring it to focus
-    if let Some(existing) = app.get_webview("onyx-outlook") {
-        existing.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Build URL — append realm query param for university SSO
-    let base_url = match &realm {
-        Some(r) if !r.is_empty() => {
-            format!("https://outlook.office365.com/mail/?realm={}", r)
+pub async fn open_outlook_onyx(app: AppHandle, realm: Option<String>) -> Result<(), String> {
+    // Run on the main thread via async closure to avoid blocking the event loop
+    let result = tokio::task::spawn_blocking(move || {
+        // If the embedded webview already exists, just bring it to focus
+        if let Some(existing) = app.get_webview("onyx-outlook") {
+            existing.set_focus().map_err(|e| e.to_string())?;
+            return Ok(());
         }
-        _ => "https://outlook.office365.com/mail/".to_string(),
-    };
 
-    let url: url::Url = base_url
-        .parse()
-        .map_err(|e: url::ParseError| e.to_string())?;
+        // Build URL — append realm query param for university SSO
+        let base_url = match &realm {
+            Some(r) if !r.is_empty() => {
+                format!("https://outlook.office365.com/mail/?realm={}", r)
+            }
+            _ => "https://outlook.office365.com/mail/".to_string(),
+        };
 
-    println!("[Onyx-Outlook] Opening embedded: {}", url);
+        let url: url::Url = base_url
+            .parse()
+            .map_err(|e: url::ParseError| e.to_string())?;
 
-    // Get the underlying Window (not WebviewWindow) so we can add a child webview
-    let window = app
-        .get_window("main")
-        .ok_or("Main window not found")?;
+        println!("[Onyx-Outlook] Opening embedded: {}", url);
 
-    // Calculate logical dimensions (below the 30 px custom titlebar)
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let inner = window.inner_size().map_err(|e| e.to_string())?;
-    let w = inner.width as f64 / scale;
-    let h = inner.height as f64 / scale;
+        // Get the underlying Window (not WebviewWindow) so we can add a child webview
+        let window = app
+            .get_window("main")
+            .ok_or("Main window not found")?;
 
-    // Build the embedded webview with console forwarding + Onyx overlay
-    let builder = WebviewBuilder::new("onyx-outlook", WebviewUrl::External(url))
-        .initialization_script(CONSOLE_FORWARD_JS)
-        .initialization_script(OUTLOOK_INJECT_JS)
-        .auto_resize();
+        // Calculate logical dimensions (below the 30 px custom titlebar)
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let inner = window.inner_size().map_err(|e| e.to_string())?;
+        let w = inner.width as f64 / scale;
+        let h = inner.height as f64 / scale;
 
-    // Add as a child of the main window, positioned below the titlebar
-    window
-        .add_child(
-            builder,
-            LogicalPosition::new(0.0, 30.0),
-            LogicalSize::new(w, h - 30.0),
-        )
-        .map_err(|e| {
-            eprintln!("[Onyx-Outlook] Failed to create embedded WebView: {}", e);
-            e.to_string()
-        })?;
+        // Build the embedded webview with console forwarding + Onyx overlay
+        let builder = WebviewBuilder::new("onyx-outlook", WebviewUrl::External(url))
+            .initialization_script(CONSOLE_FORWARD_JS)
+            .initialization_script(OUTLOOK_INJECT_JS)
+            .auto_resize();
 
-    // Notify frontend that the Outlook WebView is now embedded
-    let _ = app.emit("onyx-outlook-opened", ());
+        // Add as a child of the main window, positioned below the titlebar
+        window
+            .add_child(
+                builder,
+                LogicalPosition::new(0.0, 30.0),
+                LogicalSize::new(w, h - 30.0),
+            )
+            .map_err(|e| {
+                eprintln!("[Onyx-Outlook] Failed to create embedded WebView: {}", e);
+                e.to_string()
+            })?;
 
-    Ok(())
+        // Notify frontend that the Outlook WebView is now embedded
+        let _ = app.emit("onyx-outlook-opened", ());
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?;
+
+    result
 }
 
 /// Close the embedded Outlook WebView and return to the normal Onyx email UI.
