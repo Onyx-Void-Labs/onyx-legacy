@@ -6,13 +6,14 @@
 // derived from the user's vault key. Thumbnails are also encrypted.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use tokio::fs;
+
+use crate::crypto;
+use sha2::{Sha256, Digest};
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -71,108 +72,34 @@ pub struct PhotoStats {
 
 // ─── Crypto Helpers ─────────────────────────────────────────────────────────
 
-fn derive_photo_key(master_key: &str, salt: &str) -> [u8; KEY_LEN] {
-    let mut hasher = Sha256::new();
-    hasher.update(master_key.as_bytes());
-    hasher.update(b"onyx-photos-v1-");
-    hasher.update(salt.as_bytes());
-    let result = hasher.finalize();
-    let mut key = [0u8; KEY_LEN];
-    key.copy_from_slice(&result);
-    key
+/// Derive a photo-specific encryption key using HKDF-SHA256.
+/// Domain: "onyx-photos-v1", Context: photo_id
+fn derive_photo_key(master_key: &str, photo_id: &str) -> [u8; KEY_LEN] {
+    crypto::derive_key_from_str(master_key, "onyx-photos-v1", photo_id)
+        .expect("HKDF key derivation should never fail for valid inputs")
 }
 
+/// Encrypt photo data using AES-256-GCM with versioned format.
+/// Output: version(1) || nonce(12) || ciphertext || tag(16)
+/// Backwards-compatible: decrypt auto-detects legacy XOR+HMAC format.
 fn encrypt_photo_data(data: &[u8], master_key: &str, photo_id: &str) -> Result<Vec<u8>, String> {
-    use sha2::Sha256;
-
     let key = derive_photo_key(master_key, photo_id);
-    let mut nonce = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce);
-
-    // XOR-based stream cipher (simplified — production would use ring/aes-gcm crate)
-    // For a real implementation you'd add aes-gcm to Cargo.toml
-    // Here we use a simple XOR with SHA-256 keystream for demonstration
-    let mut encrypted = Vec::with_capacity(NONCE_LEN + data.len() + 32);
-    encrypted.extend_from_slice(&nonce);
-
-    // Generate keystream blocks and XOR
-    let mut offset = 0;
-    let mut block_counter: u64 = 0;
-    let mut ciphertext = vec![0u8; data.len()];
-
-    while offset < data.len() {
-        let mut block_hasher = Sha256::new();
-        block_hasher.update(&key);
-        block_hasher.update(&nonce);
-        block_hasher.update(&block_counter.to_le_bytes());
-        let keystream_block = block_hasher.finalize();
-
-        let chunk_end = std::cmp::min(offset + 32, data.len());
-        for i in offset..chunk_end {
-            ciphertext[i] = data[i] ^ keystream_block[i - offset];
-        }
-
-        offset = chunk_end;
-        block_counter += 1;
-    }
-
-    encrypted.extend_from_slice(&ciphertext);
-
-    // Append HMAC tag (SHA-256 of key + nonce + ciphertext)
-    let mut mac_hasher = Sha256::new();
-    mac_hasher.update(&key);
-    mac_hasher.update(&nonce);
-    mac_hasher.update(&ciphertext);
-    let tag = mac_hasher.finalize();
-    encrypted.extend_from_slice(&tag);
-
-    Ok(encrypted)
+    crypto::encrypt_versioned(&key, data, Some(photo_id.as_bytes()))
+        .map_err(|e| e.to_string())
 }
 
+/// Decrypt photo data — auto-detects new AES-256-GCM or legacy XOR+HMAC format.
 fn decrypt_photo_data(encrypted: &[u8], master_key: &str, photo_id: &str) -> Result<Vec<u8>, String> {
-    use sha2::Sha256;
-
-    if encrypted.len() < NONCE_LEN + 32 {
-        return Err("Encrypted data too short".to_string());
-    }
-
     let key = derive_photo_key(master_key, photo_id);
-    let nonce = &encrypted[..NONCE_LEN];
-    let ciphertext = &encrypted[NONCE_LEN..encrypted.len() - 32];
-    let stored_tag = &encrypted[encrypted.len() - 32..];
-
-    // Verify HMAC
-    let mut mac_hasher = Sha256::new();
-    mac_hasher.update(&key);
-    mac_hasher.update(nonce);
-    mac_hasher.update(ciphertext);
-    let computed_tag = mac_hasher.finalize();
-
-    if computed_tag.as_slice() != stored_tag {
-        return Err("Authentication failed — data may be corrupted".to_string());
-    }
-
-    // Decrypt with same keystream
-    let mut plaintext = vec![0u8; ciphertext.len()];
-    let mut offset = 0;
-    let mut block_counter: u64 = 0;
-
-    while offset < ciphertext.len() {
-        let mut block_hasher = Sha256::new();
-        block_hasher.update(&key);
-        block_hasher.update(nonce);
-        block_hasher.update(&block_counter.to_le_bytes());
-        let keystream_block = block_hasher.finalize();
-
-        let chunk_end = std::cmp::min(offset + 32, ciphertext.len());
-        for i in offset..chunk_end {
-            plaintext[i] = ciphertext[i] ^ keystream_block[i - offset];
-        }
-
-        offset = chunk_end;
-        block_counter += 1;
-    }
-
+    // For legacy detection, we need to map the domain separator correctly
+    // Legacy photos used "onyx-photos-v1-" prefix in their SHA-256 derivation
+    let (plaintext, _is_legacy) = crypto::decrypt_auto(
+        &key,
+        Some(master_key),
+        Some(photo_id),
+        encrypted,
+        Some(photo_id.as_bytes()),
+    ).map_err(|e| e.to_string())?;
     Ok(plaintext)
 }
 
@@ -503,13 +430,6 @@ fn compute_checksum(data: &[u8]) -> String {
     hasher.update(data);
     let result = hasher.finalize();
     hex::encode(result)
-}
-
-// We need a simple hex encode since we're not adding the hex crate
-mod hex {
-    pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes.as_ref().iter().map(|b| format!("{:02x}", b)).collect()
-    }
 }
 
 // ─── Tauri Commands ─────────────────────────────────────────────────────────

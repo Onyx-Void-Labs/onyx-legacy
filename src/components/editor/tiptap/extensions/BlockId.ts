@@ -2,7 +2,7 @@
  * BlockId.ts — TipTap extension that assigns stable UUIDs to every block node.
  * Each block gets a `data-block-id` attribute (UUID), generated on node creation,
  * persisted in the document. This enables Painter Mode to associate paint annotations
- * with specific blocks via the Yjs paint_annotations map.
+ * with specific blocks via the Loro paint_annotations map.
  */
 
 import { Extension } from '@tiptap/core';

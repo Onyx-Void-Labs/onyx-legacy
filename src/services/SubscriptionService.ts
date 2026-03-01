@@ -1,6 +1,6 @@
 import { pb } from '../lib/pocketbase';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:1234'; // Points to Hocuspocus/Express
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:1234';
 
 export interface CreateSubscriptionResponse {
     subscriptionId: string;

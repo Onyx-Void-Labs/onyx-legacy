@@ -1,50 +1,58 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { IS_TAURI, IS_ANDROID, IS_IOS } from '../hooks/usePlatform';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types (aligned with Iroh peer info from network.rs) ─────────────────────
 
 export interface PeerInfo {
-    id: string;
-    name: string;
-    ip: string;
-    port: number;
-    last_seen: number;
+    node_id: string;
+    conn_type: string;      // "direct" | "relay" | "direct+relay" | "none"
+    latency_ms: number | null;
+    is_connected: boolean;
+    relay_url: string | null;
+    last_activity: number;
 }
 
-export interface P2PStatus {
-    enabled: boolean;
-    listening: boolean;
-    port: number;
+export interface IrohNodeStatus {
+    active: boolean;
+    node_id: string;
     peer_count: number;
     peers: PeerInfo[];
-    last_sync: number | null;
+    relay_url: string | null;
+    active_connections: number;
+    mdns_active: boolean;
+    dht_active: boolean;
 }
+
+/**
+ * Traffic Light color for the P2P connection indicator:
+ *   green  = at least one direct P2P peer
+ *   yellow = connected via relay only
+ *   red    = no peers / node offline
+ */
+export type TrafficLight = 'green' | 'yellow' | 'red';
 
 export type P2PConnectionState = 'disabled' | 'scanning' | 'connected' | 'syncing' | 'error';
 
 interface P2PContextType {
-    /** Whether P2P is enabled in settings */
+    /** Whether the Iroh node is active */
     enabled: boolean;
-    /** Toggle P2P on/off */
-    setEnabled: (enabled: boolean) => void;
     /** Current connection state */
     connectionState: P2PConnectionState;
-    /** Discovered LAN peers */
+    /** Discovered/connected peers */
     peers: PeerInfo[];
     /** Number of active peers */
     peerCount: number;
-    /** Last successful sync timestamp */
-    lastSync: number | null;
-    /** Manually trigger sync with a specific peer */
-    syncWithPeer: (peerId: string, encryptedPayload: string, room: string) => Promise<void>;
-    /** Flush all pending ops to all peers (called on app close) */
-    flushOps: (encryptedPayload: string, room: string) => Promise<number>;
+    /** Traffic light indicator */
+    trafficLight: TrafficLight;
+    /** Our NodeId (hex) */
+    nodeId: string | null;
+    /** Full Iroh status object */
+    status: IrohNodeStatus | null;
     /** Refresh peer list */
     refreshPeers: () => Promise<void>;
-    /** Full status object */
-    status: P2PStatus | null;
+    /** Sync a specific doc with a peer */
+    syncDocWithPeer: (peerId: string, docId: string) => Promise<void>;
 }
 
 const P2PContext = createContext<P2PContextType | null>(null);
@@ -57,89 +65,58 @@ export function useP2P() {
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-const P2P_SETTINGS_KEY = 'onyx-p2p-enabled';
-
 export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [enabled, setEnabledState] = useState<boolean>(() => {
-        try {
-            const saved = localStorage.getItem(P2P_SETTINGS_KEY);
-            return saved === 'true';
-        } catch {
-            return false;
-        }
-    });
-
     const [connectionState, setConnectionState] = useState<P2PConnectionState>('disabled');
     const [peers, setPeers] = useState<PeerInfo[]>([]);
-    const [lastSync, setLastSync] = useState<number | null>(null);
-    const [status, setStatus] = useState<P2PStatus | null>(null);
+    const [nodeId, setNodeId] = useState<string | null>(null);
+    const [status, setStatus] = useState<IrohNodeStatus | null>(null);
 
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const isTauri = IS_TAURI;
-    // P2P uses TCP/UDP multicast — not supported on Android/iOS
-    const isP2PSupported = isTauri && !IS_ANDROID && !IS_IOS;
+    const isSupported = isTauri && !IS_ANDROID && !IS_IOS;
 
-    // ─── Enable/Disable P2P ───────────────────────────────────────────────
+    // ─── Compute traffic light from peers ─────────────────────────────────
 
-    const setEnabled = useCallback(async (value: boolean) => {
-        setEnabledState(value);
-        localStorage.setItem(P2P_SETTINGS_KEY, value.toString());
+    const trafficLight: TrafficLight = (() => {
+        if (!status?.active || peers.length === 0) return 'red';
+        const hasDirect = peers.some(p => p.conn_type === 'direct' || p.conn_type === 'direct+relay');
+        return hasDirect ? 'green' : 'yellow';
+    })();
 
-        if (!isP2PSupported) return;
+    const enabled = status?.active ?? false;
 
-        try {
-            if (value) {
-                await invoke('enable_p2p');
-                setConnectionState('scanning');
-            } else {
-                await invoke('disable_p2p');
-                setConnectionState('disabled');
-                setPeers([]);
-                setStatus(null);
-            }
-        } catch (err) {
-            console.error('[P2P] Toggle error:', err);
-            setConnectionState('error');
-        }
-    }, [isP2PSupported]);
-
-    // ─── Poll for peers and status ────────────────────────────────────────
+    // ─── Poll for Iroh status ─────────────────────────────────────────────
 
     const refreshPeers = useCallback(async () => {
-        if (!isP2PSupported || !enabled) return;
+        if (!isSupported) return;
 
         try {
-            const result = await invoke<P2PStatus>('get_p2p_status');
+            const result = await invoke<IrohNodeStatus>('iroh_get_status');
             setStatus(result);
             setPeers(result.peers);
-            setLastSync(result.last_sync);
+            setNodeId(result.node_id);
 
-            if (result.peer_count > 0) {
+            if (result.active_connections > 0) {
                 setConnectionState('connected');
-            } else if (result.enabled) {
+            } else if (result.active) {
                 setConnectionState('scanning');
+            } else {
+                setConnectionState('disabled');
             }
         } catch (err) {
-            console.error('[P2P] Status poll error:', err);
+            console.error('[P2P] Iroh status poll error:', err);
         }
-    }, [isP2PSupported, enabled]);
+    }, [isSupported]);
 
-    // Start/stop polling when enabled state changes
+    // Start polling on mount
     useEffect(() => {
-        if (enabled && isP2PSupported) {
-            // Initial enable
-            invoke('enable_p2p').catch(console.error);
-            setConnectionState('scanning');
+        if (!isSupported) return;
 
-            // Poll every 5 seconds
-            pollRef.current = setInterval(refreshPeers, 5000);
-            refreshPeers();
-        } else {
-            if (pollRef.current) {
-                clearInterval(pollRef.current);
-                pollRef.current = null;
-            }
-        }
+        // Initial fetch
+        refreshPeers();
+
+        // Poll every 5 seconds
+        pollRef.current = setInterval(refreshPeers, 5000);
 
         return () => {
             if (pollRef.current) {
@@ -147,97 +124,38 @@ export const P2PProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 pollRef.current = null;
             }
         };
-    }, [enabled, isP2PSupported, refreshPeers]);
+    }, [isSupported, refreshPeers]);
 
-    // ─── Sync with peer ───────────────────────────────────────────────────
+    // ─── Sync a doc with a specific peer via Iroh ─────────────────────────
 
-    const syncWithPeer = useCallback(async (peerId: string, encryptedPayload: string, room: string) => {
-        if (!isP2PSupported) return;
+    const syncDocWithPeer = useCallback(async (peerId: string, docId: string) => {
+        if (!isSupported) return;
 
         setConnectionState('syncing');
         try {
-            await invoke('sync_with_peer', {
-                peerId,
-                encryptedPayload,
-                room,
-            });
-            setLastSync(Math.floor(Date.now() / 1000));
+            await invoke('sync_doc_with_peer', { peerNodeId: peerId, docId });
             setConnectionState('connected');
         } catch (err) {
-            console.error('[P2P] Sync error:', err);
+            console.error('[P2P] Doc sync error:', err);
             setConnectionState('error');
-            // Recover to connected state after 3s
             setTimeout(() => {
                 setConnectionState(peers.length > 0 ? 'connected' : 'scanning');
             }, 3000);
             throw err;
         }
-    }, [isP2PSupported, peers.length]);
-
-    // ─── Flush ops on close ───────────────────────────────────────────────
-
-    const flushOps = useCallback(async (encryptedPayload: string, room: string): Promise<number> => {
-        if (!isP2PSupported || !enabled) return 0;
-
-        try {
-            const count = await invoke<number>('flush_p2p_ops', {
-                encryptedPayload,
-                room,
-            });
-            return count;
-        } catch (err) {
-            console.error('[P2P] Flush error:', err);
-            return 0;
-        }
-    }, [isP2PSupported, enabled]);
-
-    // ─── Listen for incoming P2P sync messages from Rust ──────────────────
-
-    useEffect(() => {
-        if (!isP2PSupported) return;
-
-        let unlisten: (() => void) | null = null;
-
-        listen<{ payload: string; room: string; sender_id: string }>('p2p-sync-received', (event) => {
-            console.log('[P2P] Received sync from peer:', event.payload.sender_id);
-            // Dispatch custom DOM event for SyncContext to handle
-            window.dispatchEvent(new CustomEvent('onyx:p2p-sync', {
-                detail: {
-                    payload: event.payload.payload,
-                    room: event.payload.room,
-                    senderId: event.payload.sender_id,
-                }
-            }));
-            setLastSync(Math.floor(Date.now() / 1000));
-        }).then(fn => { unlisten = fn; });
-
-        return () => {
-            if (unlisten) unlisten();
-        };
-    }, [isP2PSupported]);
-
-    // ─── Cleanup on unmount ───────────────────────────────────────────────
-
-    useEffect(() => {
-        return () => {
-            if (isP2PSupported && enabled) {
-                invoke('disable_p2p').catch(() => {});
-            }
-        };
-    }, []);
+    }, [isSupported, peers.length]);
 
     return (
         <P2PContext.Provider value={{
             enabled,
-            setEnabled,
             connectionState,
             peers,
             peerCount: peers.length,
-            lastSync,
-            syncWithPeer,
-            flushOps,
-            refreshPeers,
+            trafficLight,
+            nodeId,
             status,
+            refreshPeers,
+            syncDocWithPeer,
         }}>
             {children}
         </P2PContext.Provider>

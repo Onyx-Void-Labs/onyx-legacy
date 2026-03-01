@@ -1,0 +1,47 @@
+[package]
+name = "onyx-home-station"
+version = "0.1.0"
+edition = "2021"
+description = "Onyx Home Station — headless always-on sync node"
+
+[dependencies]
+# Networking
+iroh = { version = "0.32", features = ["discovery-local-network", "discovery-pkarr-dht"] }
+iroh-base = "0.32"
+
+# CRDT
+loro = "1"
+
+# Crypto
+ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
+x25519-dalek = { version = "2", features = ["static_secrets", "serde"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+
+# Storage
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
+sled = "0.34"
+
+# Runtime
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+base64 = "0.22"
+hex = "0.4"
+dashmap = "6"
+parking_lot = "0.12"
+prost = "0.13"
+bytes = "1"
+directories = "5"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+zeroize = { version = "1", features = ["derive"] }
+reqwest = { version = "0.13", features = ["json"] }

@@ -1,7 +1,7 @@
 /**
- * VersionHistoryService — stores Y.Doc snapshots in IndexedDB for version history.
+ * VersionHistoryService — stores Loro doc snapshots in IndexedDB for version history.
  *
- * Each snapshot is a compressed binary encoding of the Y.Doc state at a point in time.
+ * Each snapshot is a compressed binary encoding of the Loro doc state at a point in time.
  * Snapshots are taken:
  *   - On explicit "Save Version" action
  *   - Periodically (auto-snapshot every N minutes of editing)
@@ -17,7 +17,7 @@ export interface DocSnapshot {
     noteId: string;
     label: string;
     timestamp: number;
-    /** Y.Doc binary state as Uint8Array */
+    /** Loro doc binary state as Uint8Array */
     state: Uint8Array;
     /** Text-only preview of the document (first ~200 chars) */
     preview: string;
@@ -58,7 +58,7 @@ function openDB(): Promise<IDBDatabase> {
 /* ─── Public API ────────────────────────────────────────── */
 
 /**
- * Save a snapshot of a Y.Doc state.
+ * Save a snapshot of a Loro doc state.
  */
 export async function saveSnapshot(
     noteId: string,

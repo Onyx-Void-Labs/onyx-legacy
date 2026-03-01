@@ -6,8 +6,8 @@ import { openPath } from '@tauri-apps/plugin-opener';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { writeTextFile, readDir, readTextFile } from '@tauri-apps/plugin-fs';
 import { useState, useEffect } from 'react';
-import * as Y from 'yjs';
-import { IndexeddbPersistence } from 'y-indexeddb';
+import localforage from 'localforage';
+import { LoroDoc } from 'loro-crdt';
 
 export default function DataTab() {
     const { files, createFile } = useSync();
@@ -94,29 +94,30 @@ export default function DataTab() {
 
             setIsExporting(true);
             let count = 0;
+            const noteStore = localforage.createInstance({ name: 'onyx', storeName: 'notes' });
 
             for (const file of files) {
-                // 1. Create temp doc to read from IndexedDB
-                const doc = new Y.Doc();
-                const persistence = new IndexeddbPersistence(`onyx-note-${file.id}`, doc);
+                // Load Loro snapshot from localforage
+                const snapshot = await noteStore.getItem<Uint8Array>(`note-${file.id}`);
+                let content = '';
 
-                await new Promise<void>((resolve) => {
-                    persistence.once('synced', () => {
-                        resolve();
-                    });
-                });
+                if (snapshot) {
+                    try {
+                        const doc = new LoroDoc();
+                        doc.import(snapshot);
+                        // Try to get text content from the Loro doc
+                        const text = doc.getText('content');
+                        content = text.toString();
+                    } catch (e) {
+                        console.warn(`[Export] Failed to read Loro doc for ${file.id}:`, e);
+                    }
+                }
 
-                const content = doc.getText('codemirror').toString();
                 const safeTitle = file.title.replace(/[^a-z0-9\u00a0-\uffff\-_\. ]/gi, '_').trim() || 'Untitled';
-
-                // Handle duplicate names in export by overwriting for now (simplified)
-                let fileName = `${safeTitle}.md`;
-                let fullPath = await join(selected, fileName);
+                const fileName = `${safeTitle}.md`;
+                const fullPath = await join(selected, fileName);
 
                 await writeTextFile(fullPath, content);
-
-                persistence.destroy();
-                doc.destroy();
                 count++;
             }
 
@@ -141,6 +142,7 @@ export default function DataTab() {
             setIsImporting(true);
             const entries = await readDir(selected);
             let count = 0;
+            const noteStore = localforage.createInstance({ name: 'onyx', storeName: 'notes' });
 
             for (const entry of entries) {
                 if (entry.isFile && entry.name.endsWith('.md')) {
@@ -148,27 +150,20 @@ export default function DataTab() {
                     const content = await readTextFile(fullPath);
                     const title = entry.name.replace(/\.md$/i, '');
 
-                    // Create new note
-                    const newId = createFile(title); // Metadata created
+                    // Create new note metadata
+                    const newId = createFile(title);
 
-                    // Initialize content
-                    const doc = new Y.Doc();
-                    const persistence = new IndexeddbPersistence(`onyx-note-${newId}`, doc);
+                    // Create Loro doc with the imported content
+                    const doc = new LoroDoc();
+                    const text = doc.getText('content');
+                    text.insert(0, content);
+                    const meta = doc.getMap('meta');
+                    meta.set('title', title);
 
-                    await new Promise<void>((resolve) => {
-                        persistence.once('synced', () => resolve());
-                    });
+                    // Persist the Loro snapshot
+                    const snapshot = doc.export({ mode: 'snapshot' });
+                    await noteStore.setItem(`note-${newId}`, snapshot);
 
-                    doc.transact(() => {
-                        doc.getText('codemirror').insert(0, content);
-                        doc.getMap('meta').set('title', title);
-                    });
-
-                    // Allow persistence to save
-                    await new Promise(r => setTimeout(r, 50));
-
-                    persistence.destroy();
-                    doc.destroy();
                     count++;
                 }
             }

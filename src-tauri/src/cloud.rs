@@ -4,13 +4,13 @@
 // before touching disk. Supports arbitrary file types.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use tokio::fs;
+
+use crate::crypto;
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -74,103 +74,41 @@ pub struct UploadResult {
     pub checksum: String,
 }
 
-// ─── Crypto ─────────────────────────────────────────────────────────────────
+// ─── Crypto (AES-256-GCM via crypto.rs) ─────────────────────────────────────
 
-fn derive_key(master_key: &str, salt: &str) -> [u8; KEY_LEN] {
-    let mut hasher = Sha256::new();
-    hasher.update(master_key.as_bytes());
-    hasher.update(b"onyx-cloud-v1-");
-    hasher.update(salt.as_bytes());
-    let result = hasher.finalize();
-    let mut key = [0u8; KEY_LEN];
-    key.copy_from_slice(&result);
-    key
+/// Derive a file-specific encryption key using HKDF-SHA256.
+/// Domain: "onyx-cloud-v1", Context: file_id
+fn derive_key(master_key: &str, file_id: &str) -> [u8; KEY_LEN] {
+    crypto::derive_key_from_str(master_key, "onyx-cloud-v1", file_id)
+        .expect("HKDF key derivation should never fail for valid inputs")
 }
 
+/// Encrypt file data using AES-256-GCM with versioned format.
+/// Output: version(1) || nonce(12) || ciphertext || tag(16)
+/// Backwards-compatible: decrypt_data auto-detects legacy XOR+HMAC format.
 fn encrypt_data(data: &[u8], master_key: &str, file_id: &str) -> Result<Vec<u8>, String> {
     let key = derive_key(master_key, file_id);
-    let mut nonce = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce);
-
-    let mut encrypted = Vec::with_capacity(NONCE_LEN + data.len() + 32);
-    encrypted.extend_from_slice(&nonce);
-
-    // XOR stream cipher with SHA-256 keystream
-    let mut ciphertext = vec![0u8; data.len()];
-    let mut offset = 0;
-    let mut counter: u64 = 0;
-
-    while offset < data.len() {
-        let mut h = Sha256::new();
-        h.update(&key);
-        h.update(&nonce);
-        h.update(&counter.to_le_bytes());
-        let ks = h.finalize();
-
-        let end = std::cmp::min(offset + 32, data.len());
-        for i in offset..end {
-            ciphertext[i] = data[i] ^ ks[i - offset];
-        }
-        offset = end;
-        counter += 1;
-    }
-
-    encrypted.extend_from_slice(&ciphertext);
-
-    // HMAC tag
-    let mut mac = Sha256::new();
-    mac.update(&key);
-    mac.update(&nonce);
-    mac.update(&ciphertext);
-    encrypted.extend_from_slice(&mac.finalize());
-
-    Ok(encrypted)
+    crypto::encrypt_versioned(&key, data, Some(file_id.as_bytes()))
+        .map_err(|e| e.to_string())
 }
 
+/// Decrypt file data — auto-detects new AES-256-GCM or legacy XOR+HMAC format.
+/// Legacy files are decrypted with the old scheme; callers should re-encrypt.
 fn decrypt_data(encrypted: &[u8], master_key: &str, file_id: &str) -> Result<Vec<u8>, String> {
-    if encrypted.len() < NONCE_LEN + 32 {
-        return Err("Data too short".to_string());
-    }
-
     let key = derive_key(master_key, file_id);
-    let nonce = &encrypted[..NONCE_LEN];
-    let ciphertext = &encrypted[NONCE_LEN..encrypted.len() - 32];
-    let tag = &encrypted[encrypted.len() - 32..];
-
-    // Verify HMAC
-    let mut mac = Sha256::new();
-    mac.update(&key);
-    mac.update(nonce);
-    mac.update(ciphertext);
-    if mac.finalize().as_slice() != tag {
-        return Err("Authentication failed".to_string());
-    }
-
-    let mut plaintext = vec![0u8; ciphertext.len()];
-    let mut offset = 0;
-    let mut counter: u64 = 0;
-
-    while offset < ciphertext.len() {
-        let mut h = Sha256::new();
-        h.update(&key);
-        h.update(nonce);
-        h.update(&counter.to_le_bytes());
-        let ks = h.finalize();
-
-        let end = std::cmp::min(offset + 32, ciphertext.len());
-        for i in offset..end {
-            plaintext[i] = ciphertext[i] ^ ks[i - offset];
-        }
-        offset = end;
-        counter += 1;
-    }
-
+    let (plaintext, _is_legacy) = crypto::decrypt_auto(
+        &key,
+        Some(master_key),
+        Some(file_id),
+        encrypted,
+        Some(file_id.as_bytes()),
+    ).map_err(|e| e.to_string())?;
     Ok(plaintext)
 }
 
+/// Compute SHA-256 checksum of data, returned as hex string.
 fn compute_checksum(data: &[u8]) -> String {
-    let hash = Sha256::digest(data);
-    hash.iter().map(|b| format!("{:02x}", b)).collect()
+    crypto::checksum_sha256(data)
 }
 
 // ─── Database ───────────────────────────────────────────────────────────────

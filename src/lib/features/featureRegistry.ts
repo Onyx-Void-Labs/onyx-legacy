@@ -29,7 +29,7 @@ export const FEATURE_MODULES: FeatureModule[] = [
   {
     id: 'notes',
     name: 'Notes & Editor',
-    description: 'The core rich-text editor with Yjs collaboration, templates, and formatting.',
+    description: 'The core rich-text editor with Loro CRDT collaboration, templates, and formatting.',
     icon: 'pen-line',
     category: 'editor',
     enabled: true,

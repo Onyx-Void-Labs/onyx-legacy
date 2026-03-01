@@ -11,7 +11,20 @@ mod onyx_outlook;
 mod messaging;
 mod photos;
 mod cloud;
-mod p2p_sync;
+
+// ─── Onyx Transport v3.0 modules ─────────────────────────────────────────────
+mod crypto;
+mod network;
+mod relay_config;
+mod doc_store;
+mod sync;
+mod cache;
+mod home_station;
+mod ratchet;
+mod messaging_v2;
+mod media;
+mod shield;
+mod sentinel;
 
 use database::Database;
 use tauri::Manager;
@@ -30,7 +43,6 @@ use onyx_outlook::*;
 use messaging::*;
 use photos::*;
 use cloud::*;
-use p2p_sync::*;
 
 // Stub commands for Android — Outlook WebView is desktop-only
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -426,21 +438,190 @@ pub fn run() {
                     app.manage(interceptor);
                     app.manage(syncer);
                 }
-            });
 
-            // Initialize P2P manager
-            let p2p_manager = Arc::new(p2p_sync::P2PManager::new());
-            app.manage(p2p_manager.clone());
+                // ─── Onyx Transport v3.0 Initialization ─────────────────────
+                // 1. Load or create cryptographic identity
+                let identity = match crypto::OnyxIdentity::load_or_create(
+                    &app.path().app_data_dir().unwrap_or_default()
+                ) {
+                    Ok(id) => Arc::new(id),
+                    Err(e) => {
+                        eprintln!("[Crypto] Identity init failed: {}", e);
+                        Arc::new(crypto::OnyxIdentity::generate())
+                    }
+                };
+                app.manage(identity.clone());
+
+                // 2. Load relay config
+                let relay_config = relay_config::RelayConfig::load(
+                    app.path().app_data_dir().ok().as_ref()
+                );
+
+                // 3. Start Iroh node
+                let iroh_node = match network::OnyxNode::start(identity.clone(), &relay_config).await {
+                    Ok(node) => {
+                        println!("[Iroh] Node started — NodeId: {}", node.node_id_hex());
+                        Arc::new(node)
+                    }
+                    Err(e) => {
+                        eprintln!("[Iroh] Node start failed: {}", e);
+                        // Create a placeholder — commands will fail gracefully
+                        panic!("[Iroh] Fatal: Cannot start network node: {}", e);
+                    }
+                };
+                app.manage(iroh_node.clone());
+
+                // 4. Initialize CRDT Document Store
+                let doc_store = Arc::new(doc_store::DocStore::new(db_pool.clone()));
+                if let Err(e) = doc_store::DocStore::migrate(&db_pool).await {
+                    eprintln!("[DocStore] Migration failed: {}", e);
+                }
+                app.manage(doc_store.clone());
+
+                // 5. Initialize CRDT Sync Engine
+                let sync_engine = Arc::new(sync::SyncEngine::new(
+                    iroh_node.clone(),
+                    doc_store.clone(),
+                ));
+                app.manage(sync_engine.clone());
+
+                // 6. Initialize Messaging V2 Engine (Signal Protocol)
+                let msg_v2_engine = Arc::new(messaging_v2::MessagingEngine::new(
+                    db_pool.clone(),
+                    identity.clone(),
+                ));
+                if let Err(e) = msg_v2_engine.migrate().await {
+                    eprintln!("[MessagingV2] Migration failed: {}", e);
+                }
+                app.manage(msg_v2_engine.clone());
+
+                // 7. Initialize Media Engine (voice/video calls)
+                let media_engine = Arc::new(media::MediaEngine::new(identity.clone()));
+                app.manage(media_engine.clone());
+
+                // 8. Initialize Shield Engine (traffic analysis resistance)
+                let shield_engine = Arc::new(shield::ShieldEngine::new());
+                app.manage(shield_engine.clone());
+
+                // 9. Initialize Sentinel Engine (relay karma system)
+                let sentinel_engine = Arc::new(sentinel::SentinelEngine::new(
+                    db_pool.clone(),
+                    identity.clone(),
+                ));
+                if let Err(e) = sentinel_engine.migrate().await {
+                    eprintln!("[Sentinel] Migration failed: {}", e);
+                }
+                sentinel_engine.start_hourly_reset();
+                app.manage(sentinel_engine.clone());
+
+                // 10. Initialize Blind Cache Client (offline relay)
+                let cache_url = std::env::var("ONYX_CACHE_URL")
+                    .unwrap_or_else(|_| "https://cache.onyxvoid.com".to_string());
+                let cache_client = Arc::new(cache::BlindCacheClient::new(
+                    cache_url,
+                    identity.clone(),
+                ));
+                app.manage(cache_client.clone());
+                println!("[BlindCache] Client initialized");
+
+                // 11. Initialize Home Station Engine (always-on sync)
+                let home_station_engine = Arc::new(home_station::HomeStationEngine::new(
+                    identity.clone(),
+                    app.path().app_data_dir().ok().as_ref(),
+                ));
+                app.manage(home_station_engine.clone());
+                println!("[HomeStation] Engine initialized");
+
+                // 12. Spawn Iroh accept loop (routes incoming connections by ALPN)
+                {
+                    let node = iroh_node.clone();
+                    let sync_eng = sync_engine.clone();
+                    let msg_eng = msg_v2_engine.clone();
+                    let media_eng = media_engine.clone();
+                    let sentinel_eng = sentinel_engine.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            match node.accept_connection().await {
+                                Ok(Some((alpn, conn))) => {
+                                    let alpn_str = String::from_utf8_lossy(&alpn).to_string();
+                                    match alpn.as_slice() {
+                                        b"onyx-sync/1" => {
+                                            let se = sync_eng.clone();
+                                            tokio::spawn(async move {
+                                                if let Err(e) = se.handle_incoming_sync(conn).await {
+                                                    eprintln!("[Sync] Incoming error: {}", e);
+                                                }
+                                            });
+                                        }
+                                        b"onyx-msg/1" => {
+                                            let me = msg_eng.clone();
+                                            tokio::spawn(async move {
+                                                let (send, recv) = match conn.accept_bi().await {
+                                                    Ok(sr) => sr,
+                                                    Err(e) => { eprintln!("[Msg] Accept bi: {}", e); return; }
+                                                };
+                                                if let Err(e) = me.handle_incoming(recv, send).await {
+                                                    eprintln!("[Msg] Incoming error: {}", e);
+                                                }
+                                            });
+                                        }
+                                        b"onyx-media/1" => {
+                                            let me = media_eng.clone();
+                                            tokio::spawn(async move {
+                                                let (send, recv) = match conn.accept_bi().await {
+                                                    Ok(sr) => sr,
+                                                    Err(e) => { eprintln!("[Media] Accept bi: {}", e); return; }
+                                                };
+                                                if let Err(e) = me.handle_incoming_call(conn, recv, send).await {
+                                                    eprintln!("[Media] Incoming error: {}", e);
+                                                }
+                                            });
+                                        }
+                                        b"onyx-sentinel/1" => {
+                                            let se = sentinel_eng.clone();
+                                            let node_ref = node.clone();
+                                            tokio::spawn(async move {
+                                                let (send, recv) = match conn.accept_bi().await {
+                                                    Ok(sr) => sr,
+                                                    Err(e) => { eprintln!("[Sentinel] Accept bi: {}", e); return; }
+                                                };
+                                                // Extract peer node id from connection
+                                                let peer_id = conn.remote_node_id()
+                                                    .map(|id| id.to_string())
+                                                    .unwrap_or_else(|_| "unknown".to_string());
+                                                if let Err(e) = se.handle_relay_request(&*node_ref, recv, send, &peer_id).await {
+                                                    eprintln!("[Sentinel] Relay error: {}", e);
+                                                }
+                                            });
+                                        }
+                                        _ => {
+                                            eprintln!("[Iroh] Unknown ALPN: {}", alpn_str);
+                                        }
+                                    }
+                                }
+                                Ok(None) => {
+                                    println!("[Iroh] Accept loop ended (node shutdown)");
+                                    break;
+                                }
+                                Err(e) => {
+                                    eprintln!("[Iroh] Accept error: {}", e);
+                                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                }
+                            }
+                        }
+                    });
+                }
+            });
 
             // Initialize Email manager
             let email_manager = Arc::new(EmailManager::new());
             app.manage(email_manager);
 
-            // Initialize Messaging manager
+            // Initialize Messaging manager (legacy — kept alongside v2)
             let msg_manager = Arc::new(messaging::MessagingManager::new());
             app.manage(msg_manager);
 
-            // Handle close event — flush P2P ops (desktop only, mobile has no close event)
+            // Handle close event — flush P2P ops + shutdown Iroh (desktop only)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let p2p_for_close = p2p_manager.clone();
@@ -474,13 +655,6 @@ pub fn run() {
             ensure_local_uuid,
             move_to_trash,
             transcribe_audio,
-            // P2P Sync commands
-            discover_peers,
-            sync_with_peer,
-            get_p2p_status,
-            enable_p2p,
-            disable_p2p,
-            flush_p2p_ops,
             // Email Client commands
             detect_email_provider,
             exchange_oauth_code,
@@ -561,7 +735,71 @@ pub fn run() {
             cloud_get_versions,
             cloud_get_stats,
             cloud_export_file,
-            cloud_empty_trash
+            cloud_empty_trash,
+            // ─── Onyx Transport v3.0 commands ─────────────────────────────
+            // Iroh Network commands
+            network::iroh_get_status,
+            network::iroh_get_node_id,
+            network::iroh_get_peers,
+            network::iroh_connect_peer,
+            network::iroh_set_relay_url,
+            network::iroh_shutdown,
+            // Relay Config
+            relay_config::get_relay_config,
+            // CRDT Doc Store commands
+            doc_store::doc_get_state_vector,
+            doc_store::doc_apply_update,
+            doc_store::doc_get_full_state,
+            doc_store::doc_list,
+            doc_store::doc_flush_all,
+            // CRDT Sync commands
+            sync::sync_doc_with_peer,
+            sync::sync_broadcast_update,
+            sync::sync_set_master_key,
+            sync::sync_replay_pending,
+            // Messaging V2 commands (Signal Protocol)
+            messaging_v2::msg_v2_get_conversations,
+            messaging_v2::msg_v2_get_messages,
+            messaging_v2::msg_v2_send_dm,
+            messaging_v2::msg_v2_initiate_session,
+            messaging_v2::msg_v2_get_prekey_bundle,
+            messaging_v2::msg_v2_set_master_key,
+            messaging_v2::msg_v2_create_group,
+            // Media commands (voice/video)
+            media::media_start_call,
+            media::media_end_call,
+            media::media_toggle_mute,
+            media::media_toggle_video,
+            media::media_get_active_calls,
+            media::media_get_call_info,
+            media::media_answer_call,
+            media::media_send_audio,
+            // Shield commands (traffic analysis resistance)
+            shield::shield_get_config,
+            shield::shield_set_config,
+            shield::shield_get_stats,
+            shield::shield_enable,
+            // Sentinel commands (relay karma)
+            sentinel::sentinel_get_status,
+            sentinel::sentinel_set_config,
+            sentinel::sentinel_get_config,
+            sentinel::sentinel_enable,
+            sentinel::sentinel_get_peer_karma,
+            sentinel::sentinel_block_peer,
+            sentinel::sentinel_unblock_peer,
+            sentinel::sentinel_get_blocklist,
+            // Blind Cache commands (offline relay)
+            cache::cache_push,
+            cache::cache_pull,
+            cache::cache_status,
+            // Home Station commands (always-on sync)
+            home_station::home_station_enable,
+            home_station::home_station_disable,
+            home_station::home_station_pair,
+            home_station::home_station_unpair,
+            home_station::home_station_list,
+            home_station::home_station_status,
+            home_station::home_station_start_pairing
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

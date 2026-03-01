@@ -9,7 +9,7 @@ import {
 
 interface VersionHistoryPanelProps {
     noteId: string;
-    /** Function to get the current Y.Doc state as Uint8Array */
+    /** Function to get the current Loro doc state as Uint8Array */
     getDocState: () => Uint8Array | null;
     /** Function to get a text-only preview of the current doc */
     getDocPreview: () => string;

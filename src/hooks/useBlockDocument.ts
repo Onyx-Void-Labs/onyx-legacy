@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { BlockDocument } from '../store/blockDocument';
-import type { YBlock } from '../types/block';
+import type { LoroBlock } from '../types/block';
 
 export function useBlockDocument(noteId: string | null, blockDoc: BlockDocument | null) {
-  const [blocks, setBlocks] = useState<YBlock[]>([]);
+  const [blocks, setBlocks] = useState<LoroBlock[]>([]);
   const [loaded, setLoaded] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* Sync React state whenever Yjs array changes */
+  /* Sync React state whenever Loro list changes */
   const syncBlocks = useCallback(() => {
     if (blockDoc) {
       setBlocks(blockDoc.getAllBlocks());
@@ -22,8 +22,8 @@ export function useBlockDocument(noteId: string | null, blockDoc: BlockDocument 
     let cancelled = false;
     setLoaded(false);
 
-    const observer = () => syncBlocks();
-    blockDoc.blocks.observeDeep(observer);
+    // Subscribe to Loro changes
+    const unsub = blockDoc.doc.subscribe(() => syncBlocks());
     syncBlocks();
 
     (async () => {
@@ -33,8 +33,8 @@ export function useBlockDocument(noteId: string | null, blockDoc: BlockDocument 
 
         const content = result.content ?? '';
 
-        // Load into BlockDocument only if it has no blocks yet, 
-        // to prevent overwriting newer changes from Hocuspocus/IndexedDB
+        // Load into BlockDocument only if it has no blocks yet,
+        // to prevent overwriting newer changes from local persistence
         if (content.trim().length > 0 && blockDoc.length === 0) {
           try {
             blockDoc.load(content);
@@ -56,7 +56,7 @@ export function useBlockDocument(noteId: string | null, blockDoc: BlockDocument 
 
     return () => {
       cancelled = true;
-      blockDoc.blocks.unobserveDeep(observer);
+      unsub();
     };
   }, [noteId, blockDoc, syncBlocks]);
 
@@ -74,14 +74,11 @@ export function useBlockDocument(noteId: string | null, blockDoc: BlockDocument 
     }, 400);
   }, [noteId, blockDoc]);
 
-  /* Notify save on every Yjs mutation */
+  /* Notify save on every Loro mutation */
   useEffect(() => {
     if (!loaded || !blockDoc) return;
-    const observer = () => save();
-    blockDoc.blocks.observeDeep(observer);
-    return () => {
-      blockDoc.blocks.unobserveDeep(observer);
-    };
+    const unsub = blockDoc.doc.subscribe(() => save());
+    return () => { unsub(); };
   }, [loaded, blockDoc, save]);
 
   return { blocks, loaded };

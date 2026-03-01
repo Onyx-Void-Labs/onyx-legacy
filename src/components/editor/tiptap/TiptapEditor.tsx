@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import Collaboration from '@tiptap/extension-collaboration';
 import Highlight from '@tiptap/extension-highlight';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -27,11 +26,11 @@ import SuperscriptExt from '@tiptap/extension-superscript';
 // Syntax highlighting
 import { common, createLowlight } from 'lowlight';
 
-// Yjs
-import * as Y from 'yjs';
-import { HocuspocusProvider } from '@hocuspocus/provider';
-import { IndexeddbPersistence } from 'y-indexeddb';
+// Loro CRDT
+import { LoroDoc } from 'loro-crdt';
+import { LoroSyncPlugin, LoroUndoPlugin, type LoroDocType } from 'loro-prosemirror';
 import { invoke } from '@tauri-apps/api/core';
+import localforage from 'localforage';
 
 // Custom extensions
 import { CalloutNode } from './extensions/CalloutNode';
@@ -58,7 +57,6 @@ import TranscriptionPanel from '../TranscriptionPanel';
 import { usePainterStore } from '@/store/painterStore';
 import { useFeature } from '@/hooks/useFeature';
 import { extractKeyTerms } from '@/lib/painter/autoPaint';
-import type { PaintAnnotation } from '@/lib/painter/paintTypes';
 
 // UI Components
 import { Toolbar } from './Toolbar';
@@ -85,48 +83,39 @@ interface TiptapEditorProps {
 }
 
 /**
- * Serialises a Yjs doc's XML Fragment into a JSON string compatible with
- * the existing Rust E2EE save_note/load_note pipeline.
- * We store Tiptap JSON as { version: 2, tiptap: <editorJSON> }.
+ * Serialises a Loro doc's state into a JSON string compatible with
+ * the Rust E2EE save_note/load_note pipeline.
+ * We store as { version: 3, loro: base64 }.
  */
-function serialiseTiptapDoc(ydoc: Y.Doc): string {
-    // We can't easily get Tiptap JSON from the raw Yjs doc without an editor instance.
-    // Instead, we store a marker that the content is in Yjs format.
-    // The actual content lives in the Yjs XmlFragment synced via Collaboration.
-    // For E2EE backup compatibility, we serialize the Yjs state as base64.
-    const state = Y.encodeStateAsUpdate(ydoc);
-    const base64 = btoa(String.fromCharCode(...state));
-    return JSON.stringify({ version: 2, yjs: base64 });
+function serialiseLoroDoc(doc: LoroDoc): string {
+    const snapshot = doc.export({ mode: 'snapshot' });
+    const base64 = btoa(String.fromCharCode(...snapshot));
+    return JSON.stringify({ version: 3, loro: base64 });
 }
 
 /**
- * Loads content into a Yjs doc from the saved JSON string.
+ * Loads content into a Loro doc from a saved JSON string.
+ * Handles version 3 (Loro) and version 1 (legacy blocks).
  */
-function loadIntoYjsDoc(ydoc: Y.Doc, json: string): boolean {
+function loadIntoLoroDoc(doc: LoroDoc, json: string): boolean {
     try {
         const parsed = JSON.parse(json);
 
-        if (parsed.version === 2 && parsed.yjs) {
-            // Tiptap Yjs format — apply the state update
-            const binary = Uint8Array.from(atob(parsed.yjs), (c) => c.charCodeAt(0));
-            Y.applyUpdate(ydoc, binary);
+        if (parsed.version === 3 && parsed.loro) {
+            // Loro snapshot format
+            const binary = Uint8Array.from(atob(parsed.loro), (c) => c.charCodeAt(0));
+            doc.import(binary);
             return true;
         }
 
         if (parsed.version === 1 && parsed.blocks) {
-            // Legacy BlockDocument format — convert blocks to Tiptap content
-            const fragment = ydoc.getXmlFragment('default');
-            if (fragment.length === 0) {
-                // Convert old blocks to basic paragraphs in the Yjs XML Fragment
-                // This is a one-way migration: old block content becomes Tiptap paragraphs
-                const xmlEl = new Y.XmlElement('paragraph');
-                const text = new Y.XmlText();
-                const allText = parsed.blocks
-                    .map((b: { content: string }) => b.content || '')
-                    .join('\n\n');
+            // Legacy BlockDocument format — import as text into the Loro doc
+            const allText = parsed.blocks
+                .map((b: { content: string }) => b.content || '')
+                .join('\n\n');
+            if (allText.trim().length > 0) {
+                const text = doc.getText('content');
                 text.insert(0, allText);
-                xmlEl.insert(0, [text]);
-                fragment.insert(0, [xmlEl]);
             }
             return true;
         }
@@ -458,25 +447,23 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
     const [tableCtx, setTableCtx] = useState<{ x: number; y: number } | null>(null);
     const [showTemplates, setShowTemplates] = useState(true);
 
-    // Yjs refs
-    const yDocRef = useRef<Y.Doc | null>(null);
-    const providerRef = useRef<HocuspocusProvider | null>(null);
-    const persistenceRef = useRef<IndexeddbPersistence | null>(null);
+    // Loro refs
+    const loroDocRef = useRef<LoroDoc | null>(null);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const saveRafRef = useRef<number | null>(null);
     const titleRef = useRef<HTMLInputElement>(null);
 
-    // Create Yjs doc and persistence for the active note
-    const yDoc = useMemo(() => {
+    // Create Loro doc for the active note
+    const loroDoc = useMemo(() => {
         if (!activeNoteId) return null;
-        const doc = new Y.Doc();
+        const doc = new LoroDoc();
         return doc;
     }, [activeNoteId]);
 
     // ─── Memoised Tiptap extensions (avoids re-creating on every render) ───
     const extensions = useMemo(() => [
         StarterKit.configure({
-            undoRedo: false, // Yjs handles undo/redo
+            undoRedo: false, // Loro handles undo/redo via LoroUndoPlugin
             codeBlock: false, // Use lowlight version instead
             dropcursor: false, // Use custom dropcursor
             link: false, // Use custom link config
@@ -493,8 +480,11 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             showOnlyWhenEditable: true,
             showOnlyCurrent: true,
         }),
-        // Collaboration via Yjs
-        ...(yDoc ? [Collaboration.configure({ document: yDoc })] : []),
+        // Collaboration via Loro CRDT
+        ...(loroDoc ? [
+            LoroSyncPlugin({ doc: loroDoc as unknown as LoroDocType }),
+            LoroUndoPlugin({ doc: loroDoc }),
+        ] : []),
         // Formatting
         Highlight.configure({ multicolor: true }),
         UnderlineExt,
@@ -541,7 +531,7 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
         BlockId,
         RecallMark,
         SmartMathExtension,
-    ], [yDoc]);
+    ] as any[], [loroDoc]);
 
     // Tiptap editor instance
     const editor = useEditor(
@@ -564,7 +554,7 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             // Autofocus at end
             autofocus: 'end',
         },
-        [activeNoteId, yDoc, ready]
+        [activeNoteId, loroDoc, ready]
     );
 
     // Painter mode state
@@ -582,12 +572,12 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
 
     // Painter: auto-paint callback
     const handleAutoPaint = useCallback(() => {
-        if (!editor || !yDocRef.current) return;
+        if (!editor || !loroDocRef.current) return;
         const text = editor.getText();
         const terms = extractKeyTerms(text);
         if (terms.length === 0) return;
 
-        const paintMap = yDocRef.current.getMap<PaintAnnotation>('paint_annotations');
+        const paintMap = loroDocRef.current.getMap('paint_annotations');
         const activePaintType = usePainterStore.getState().activePaintType;
 
         terms.forEach((term) => {
@@ -605,8 +595,8 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
             const newTitle = e.target.value;
             setTitle(newTitle);
 
-            if (activeNoteId && yDocRef.current) {
-                yDocRef.current.getMap('meta').set('title', newTitle);
+            if (activeNoteId && loroDocRef.current) {
+                loroDocRef.current.getMap('meta').set('title', newTitle);
                 updateFile(activeNoteId, { title: newTitle });
             }
         },
@@ -633,117 +623,94 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
         [editor]
     );
 
-    // Setup Yjs infrastructure
+    // Setup Loro infrastructure
     useEffect(() => {
-        if (!activeNoteId || !yDoc) {
+        if (!activeNoteId || !loroDoc) {
             setTitle('');
             setReady(false);
             return;
         }
 
-        yDocRef.current = yDoc;
+        loroDocRef.current = loroDoc;
 
-        // IndexedDB persistence
-        const persistence = new IndexeddbPersistence(`onyx-note-${activeNoteId}`, yDoc);
-        persistenceRef.current = persistence;
+        // Load from localforage first (offline persistence)
+        const noteStore = localforage.createInstance({ name: 'onyx', storeName: 'notes' });
 
-        persistence.on('synced', async () => {
-            // Try to load from Rust E2EE storage if Yjs doc is empty
-            const fragment = yDoc.getXmlFragment('default');
-            if (fragment.length === 0) {
+        (async () => {
+            // 1. Try to load from local persistence
+            const localSnapshot = await noteStore.getItem<Uint8Array>(`note-${activeNoteId}`);
+            if (localSnapshot) {
+                try {
+                    loroDoc.import(localSnapshot);
+                } catch (e) {
+                    console.warn('[TiptapEditor] Failed to load local snapshot:', e);
+                }
+            }
+
+            // 2. Try to load from Rust E2EE storage if doc is empty
+            const text = loroDoc.getText('content');
+            if (text.length === 0) {
                 try {
                     const result = await invoke<{ content: string }>('load_note', { id: activeNoteId });
                     const content = result?.content ?? '';
                     if (content.trim().length > 0) {
-                        loadIntoYjsDoc(yDoc, content);
+                        loadIntoLoroDoc(loroDoc, content);
                     }
                 } catch {
                     // Rust E2EE not active — that's fine, offline mode
                     console.warn('[TiptapEditor] load_note unavailable, offline mode');
                 }
             }
+
             setReady(true);
-        });
+        })();
 
-        // Title binding via Yjs meta map
-        const metaMap = yDoc.getMap('meta');
-        const updateTitleFromMap = () => {
-            const newTitle = metaMap.get('title') as string;
+        // Title binding via Loro meta map
+        const metaMap = loroDoc.getMap('meta');
+        const existingTitle = metaMap.get('title');
+        if (existingTitle !== undefined) {
+            setTitle(String(existingTitle) || '');
+        }
+
+        // Subscribe to Loro changes  
+        const sub = loroDoc.subscribe(() => {
+            // Update title from meta map
+            const newTitle = metaMap.get('title');
             if (newTitle !== undefined) {
-                setTitle(newTitle || '');
-            }
-        };
-        metaMap.observe(updateTitleFromMap);
-        updateTitleFromMap();
-
-        // WebSocket provider for real-time sync
-        const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:1234';
-
-        import('../../../lib/pocketbase').then(async ({ pb }) => {
-            if (!pb.authStore.isValid) return;
-
-            const token = pb.authStore.token;
-            const userId = pb.authStore.model?.id;
-            if (!token || !userId) return;
-
-            const roomName = `user-${userId}-note-${activeNoteId}`;
-            const provider = new HocuspocusProvider({
-                url: wsUrl,
-                name: roomName,
-                document: yDoc,
-                token: token,
-                onStatus: ({ status }) => {
-                    console.log('[TiptapEditor] Provider Status:', status);
-                },
-            });
-            providerRef.current = provider;
-
-            // Set awareness for collaboration cursors
-            const userColor = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
-            const userName = pb.authStore.model?.email?.split('@')[0] || 'User';
-            if (provider.awareness) {
-                provider.awareness.setLocalStateField('user', {
-                    name: userName,
-                    color: userColor,
-                });
+                setTitle(String(newTitle) || '');
             }
         });
 
-        // Debounced save to Rust E2EE — 1.5s debounce + rAF coalescing
-        // Reduces IPC chatter during rapid typing (60→120FPS friendly)
-        const saveObserver = () => {
+        // Debounced save to Rust E2EE + localforage — 1.5s debounce + rAF coalescing
+        const subSave = loroDoc.subscribe(() => {
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
             saveTimerRef.current = setTimeout(() => {
-                // Coalesce with rAF to avoid save during active rendering
                 if (saveRafRef.current) cancelAnimationFrame(saveRafRef.current);
                 saveRafRef.current = requestAnimationFrame(async () => {
                     try {
-                        const json = serialiseTiptapDoc(yDoc);
+                        // Save to localforage for offline persistence
+                        const snapshot = loroDoc.export({ mode: 'snapshot' });
+                        await noteStore.setItem(`note-${activeNoteId}`, snapshot);
+
+                        // Save to Rust E2EE
+                        const json = serialiseLoroDoc(loroDoc);
                         await invoke('save_note', { id: activeNoteId, content: json });
                     } catch {
-                        // Rust not available
+                        // Rust not available — localforage save still succeeded
                     }
                 });
             }, 1500);
-        };
-
-        yDoc.on('update', saveObserver);
+        });
 
         return () => {
             console.log('[TiptapEditor] Cleaning up for note:', activeNoteId);
-            yDoc.off('update', saveObserver);
+            sub();
+            subSave();
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
             if (saveRafRef.current) cancelAnimationFrame(saveRafRef.current);
-            if (providerRef.current) {
-                providerRef.current.destroy();
-                providerRef.current = null;
-            }
-            persistence.destroy();
-            persistenceRef.current = null;
-            yDoc.destroy();
-            yDocRef.current = null;
+            loroDocRef.current = null;
         };
-    }, [activeNoteId, yDoc]);
+    }, [activeNoteId, loroDoc]);
 
     // Zoom handler
     useEffect(() => {
@@ -950,8 +917,8 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                     <VersionHistoryPanel
                         noteId={activeNoteId}
                         getDocState={() => {
-                            if (!yDocRef.current) return null;
-                            return Y.encodeStateAsUpdate(yDocRef.current);
+                            if (!loroDocRef.current) return null;
+                            return loroDocRef.current.export({ mode: 'snapshot' });
                         }}
                         getDocPreview={() => {
                             if (!editor) return '';
@@ -963,13 +930,10 @@ export default function TiptapEditor({ activeNoteId, meta, onOpenProperties }: T
                             return text.trim() ? text.trim().split(/\s+/).length : 0;
                         }}
                         onRestore={(state) => {
-                            if (!yDocRef.current) return;
-                            const doc = yDocRef.current;
-                            doc.transact(() => {
-                                const fragment = doc.getXmlFragment('default');
-                                fragment.delete(0, fragment.length);
-                            });
-                            Y.applyUpdate(doc, state);
+                            if (!loroDocRef.current) return;
+                            const doc = new LoroDoc();
+                            doc.import(state);
+                            loroDocRef.current.import(doc.export({ mode: 'snapshot' }));
                         }}
                     />
                 )}

@@ -75,7 +75,7 @@ function P2PSection() {
                 <div className="grid grid-cols-1 gap-2">
                     {[
                         { icon: Monitor, text: 'Discovers devices via UDP multicast on your local network' },
-                        { icon: Shield, text: 'Yjs CRDT updates are exchanged over TCP with E2EE payloads' },
+                        { icon: Shield, text: 'Loro CRDT updates are exchanged over QUIC with E2EE payloads' },
                         { icon: RefreshCw, text: 'Conflict-free merge — edits on multiple devices are auto-resolved' },
                     ].map(({ icon: Icon, text }, i) => (
                         <div key={i} className="flex items-start gap-2.5 px-3 py-2 rounded-lg bg-zinc-800/20 border border-zinc-700/10">

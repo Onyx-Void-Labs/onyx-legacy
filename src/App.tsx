@@ -288,7 +288,7 @@ function AppContent() {
   }, []);
 
   const handleLockNote = async (_id: string, _password: string) => {
-    console.warn("Locking not yet implemented for Pure Yjs");
+    console.warn("Locking not yet implemented");
   };
 
   // ─── New note via type picker ────────────────────────────────────

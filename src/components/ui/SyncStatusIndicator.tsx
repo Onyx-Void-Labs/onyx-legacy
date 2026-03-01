@@ -1,17 +1,17 @@
 import { Cloud, Wifi, WifiOff, Monitor, RefreshCw } from 'lucide-react';
 import { useSync } from '../../contexts/SyncContext';
-import { useP2P } from '../../contexts/P2PContext';
-import { useState, useEffect } from 'react';
+import { useP2P, TrafficLight } from '../../contexts/P2PContext';
+import { useState } from 'react';
 
 // ─── Sync Status Indicator ───────────────────────────────────────────────────
 // Shows the current sync state in a compact indicator:
 //   - Cloud icon (VPS active)
-//   - Peer icon (P2P active)
-//   - Offline icon (IndexedDB only)
+//   - Traffic light dot (P2P quality: green/yellow/red)
+//   - Peer count badge
 
 export default function SyncStatusIndicator() {
     const { status: syncStatus } = useSync();
-    const { enabled: p2pEnabled, connectionState, peerCount, lastSync } = useP2P();
+    const { enabled: p2pEnabled, connectionState, peerCount, trafficLight } = useP2P();
 
     const [showTooltip, setShowTooltip] = useState(false);
 
@@ -22,23 +22,11 @@ export default function SyncStatusIndicator() {
     const isP2PSyncing = p2pEnabled && connectionState === 'syncing';
     const isOffline = syncStatus === 'disconnected' || syncStatus === 'offline';
 
-    // Format last sync time
-    const formatLastSync = (ts: number | null): string => {
-        if (!ts) return 'Never';
-        const diff = Math.floor(Date.now() / 1000) - ts;
-        if (diff < 10) return 'Just now';
-        if (diff < 60) return `${diff}s ago`;
-        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-        return `${Math.floor(diff / 3600)}h ago`;
-    };
-
-    // Auto-update the "ago" text
-    const [, setTick] = useState(0);
-    useEffect(() => {
-        if (!lastSync) return;
-        const interval = setInterval(() => setTick(t => t + 1), 10000);
-        return () => clearInterval(interval);
-    }, [lastSync]);
+    // Traffic light colour for the P2P dot
+    const trafficLightColor = (tl: TrafficLight) =>
+        tl === 'green' ? 'bg-emerald-400' :
+        tl === 'yellow' ? 'bg-amber-400 animate-pulse' :
+        'bg-red-400';
 
     return (
         <div
@@ -69,27 +57,18 @@ export default function SyncStatusIndicator() {
                 />
             )}
 
-            {/* P2P status */}
-            {isP2PConnected && (
-                <Monitor
-                    size={13}
-                    className="text-blue-400"
-                    strokeWidth={2}
-                />
-            )}
-            {isP2PScanning && (
-                <Wifi
-                    size={13}
-                    className="text-zinc-500 animate-pulse"
-                    strokeWidth={2}
-                />
-            )}
-            {isP2PSyncing && (
-                <RefreshCw
-                    size={13}
-                    className="text-blue-400 animate-spin"
-                    strokeWidth={2}
-                />
+            {/* P2P status + traffic light dot */}
+            {p2pEnabled && (
+                <>
+                    {isP2PConnected ? (
+                        <Monitor size={13} className="text-blue-400" strokeWidth={2} />
+                    ) : isP2PSyncing ? (
+                        <RefreshCw size={13} className="text-blue-400 animate-spin" strokeWidth={2} />
+                    ) : isP2PScanning ? (
+                        <Wifi size={13} className="text-zinc-500 animate-pulse" strokeWidth={2} />
+                    ) : null}
+                    <span className={`w-1.5 h-1.5 rounded-full ${trafficLightColor(trafficLight)}`} />
+                </>
             )}
 
             {/* Peer count badge */}
@@ -144,23 +123,14 @@ export default function SyncStatusIndicator() {
                         )}
                     </div>
 
-                    {/* Offline row */}
+                    {/* Local storage row */}
                     <div className="flex items-center gap-2 py-1.5">
                         <WifiOff size={14} className="text-zinc-600" />
                         <div className="flex-1">
-                            <div className="text-xs text-zinc-300">IndexedDB</div>
+                            <div className="text-xs text-zinc-300">Local Storage</div>
                         </div>
                         <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                     </div>
-
-                    {/* Last P2P sync */}
-                    {p2pEnabled && lastSync && (
-                        <div className="mt-2 pt-2 border-t border-zinc-800/50">
-                            <div className="text-[10px] text-zinc-600">
-                                Last P2P sync: {formatLastSync(lastSync)}
-                            </div>
-                        </div>
-                    )}
                 </div>
             )}
         </div>

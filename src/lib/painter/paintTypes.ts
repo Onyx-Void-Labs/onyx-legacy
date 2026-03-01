@@ -60,7 +60,7 @@ export const PAINT_META: Record<PaintType, PaintMeta> = {
 export const PAINT_TYPES: PaintType[] = ['question', 'answer', 'slide', 'recall', 'key_term'];
 
 /**
- * Annotation stored in the Yjs paint_annotations map.
+ * Annotation stored in the Loro paint_annotations map.
  */
 export interface PaintAnnotation {
   type: PaintType;

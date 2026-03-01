@@ -1,4 +1,4 @@
-import * as Y from 'yjs';
+import type { LoroText, LoroMap, LoroList } from 'loro-crdt';
 
 export type BlockType =
   | 'text'
@@ -18,7 +18,7 @@ export type BlockType =
 
 /**
  * Serializable block representation (for encryption/storage).
- * No Yjs types here — pure JSON.
+ * No CRDT types here — pure JSON.
  */
 export interface SerializedBlock {
   id: string;
@@ -29,16 +29,16 @@ export interface SerializedBlock {
 }
 
 /**
- * Runtime block backed by Yjs shared types.
+ * Runtime block backed by Loro shared types.
  */
-export interface YBlock {
+export interface LoroBlock {
   id: string;
   type: BlockType;
-  content: Y.Text;
-  properties: Y.Map<unknown>;
-  children: Y.Array<Y.Map<unknown>>;
-  /** Reference to the Y.Map backing this block */
-  yMap: Y.Map<unknown>;
+  content: LoroText;
+  properties: LoroMap;
+  children: LoroList;
+  /** Reference to the LoroMap backing this block */
+  container: LoroMap;
 }
 
 export interface SerializedDocument {
