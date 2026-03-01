@@ -600,8 +600,8 @@ impl OnyxNode {
 ///   - idle_timeout: 30s reclaims zombie connections without being too eager
 ///   - bidi_streams: 1000 allows parallel sync of many docs over one QUIC conn
 ///   - uni_streams: 100 for one-shot pushes (cache updates, sentinel karma)
-fn build_transport_config() -> quinn::TransportConfig {
-    let mut config = quinn::TransportConfig::default();
+fn build_transport_config() -> iroh::endpoint::TransportConfig {
+    let mut config = iroh::endpoint::TransportConfig::default();
 
     // Prevent NAT mapping expiry — critical on mobile carriers (some expire at 30s)
     config.keep_alive_interval(Some(KEEPALIVE_INTERVAL));

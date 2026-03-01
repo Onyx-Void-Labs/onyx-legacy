@@ -51,8 +51,6 @@ iroh = { version = "0.32", features = ["discovery-local-network", "discovery-pka
 iroh-base = "0.32"             # NodeId, SecretKey, tickets, node addresses
 iroh-relay = "0.32"            # Relay client for fallback connectivity
 
-quinn = "0.11"                 # QUIC transport config tuning (same version as iroh 0.32)
-
 # ─── Phase 2: CRDT Engine (Loro) ──────────────────────────────────────────────
 loro = "1"                     # Loro CRDT — Send+Sync, columnar encoding
 # yrs = "0.21"                 # KEPT (feature-gated) for V2→V3 migration only

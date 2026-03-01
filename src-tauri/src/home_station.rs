@@ -14,9 +14,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{info, warn, debug};
+use tracing::info;
 use parking_lot::RwLock;
-use base64::Engine as _;
 
 use crate::crypto::OnyxIdentity;
 
@@ -289,7 +288,7 @@ impl HomeStationEngine {
 
     /// Get our node_id as hex.
     fn node_id_hex(&self) -> String {
-        hex::encode(self.identity.signing_key.verifying_key().as_bytes())
+        self.identity.public_hex()
     }
 
     /// Save config to disk.

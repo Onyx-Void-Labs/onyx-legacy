@@ -76,14 +76,12 @@ impl BlindCacheClient {
 
     /// Get our node_id as hex string.
     fn node_id_hex(&self) -> String {
-        hex::encode(self.identity.signing_key.verifying_key().as_bytes())
+        self.identity.public_hex()
     }
 
     /// Sign a payload with our Ed25519 key.
     fn sign(&self, data: &[u8]) -> String {
-        use ed25519_dalek::Signer;
-        let sig = self.identity.signing_key.sign(data);
-        hex::encode(sig.to_bytes())
+        hex::encode(self.identity.sign(data))
     }
 
     /// Push an encrypted update to the blind cache.

@@ -621,16 +621,19 @@ pub fn run() {
             let msg_manager = Arc::new(messaging::MessagingManager::new());
             app.manage(msg_manager);
 
-            // Handle close event — flush P2P ops + shutdown Iroh (desktop only)
+            // Handle close event — flush docs + shutdown Iroh (desktop only)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
-                let p2p_for_close = p2p_manager.clone();
+                let app_handle = app.handle().clone();
                 let main_window = app.get_webview_window("main");
                 if let Some(window) = main_window {
                     window.on_window_event(move |event| {
                         if let tauri::WindowEvent::CloseRequested { .. } = event {
-                            println!("[P2P] App closing — attempting final sync flush...");
-                            let _ = p2p_for_close.stop_discovery();
+                            println!("[Onyx] App closing — flushing docs...");
+                            if let Some(store) = app_handle.try_state::<Arc<doc_store::DocStore>>() {
+                                let rt = tokio::runtime::Handle::current();
+                                let _ = rt.block_on(store.flush_all());
+                            }
                         }
                     });
                 }
