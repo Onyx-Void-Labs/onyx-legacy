@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "outlook-webview",
+  "description": "Enable IPC for the embedded Outlook WebView (external URL)",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": [
+    "onyx-outlook"
+  ],
+  "remote": {
+    "urls": ["https://outlook.office365.com/*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:allow-emit",
+    "core:event:allow-listen"
+  ]
+}

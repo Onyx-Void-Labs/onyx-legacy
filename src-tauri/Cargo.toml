@@ -1,0 +1,100 @@
+[package]
+name = "onyx"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "onyx_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.10.2", features = ["unstable"] }
+tauri-plugin-opener = "2"  # stays on latest 2.x
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net"] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+dotenv = "0.15"
+tauri-plugin-oauth = "2.0.0"
+tauri-plugin-notification = "2"
+base64 = "0.22"
+url = "2"
+regex-lite = "0.1"
+
+# ─── Phase 0: Production Cryptography ─────────────────────────────────────────
+ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
+x25519-dalek = { version = "2", features = ["static_secrets", "serde"] }
+aes-gcm = "0.10"               # AES-256-GCM AEAD — replaces XOR+HMAC
+hkdf = "0.12"                  # HKDF-SHA256 key derivation — replaces raw SHA-256
+hmac = "0.12"                  # HMAC for Double Ratchet KDF chains
+zeroize = { version = "1", features = ["derive"] } # Secure memory wiping
+chacha20poly1305 = "0.10"      # ChaCha20-Poly1305 fallback AEAD
+curve25519-dalek = "4"         # Low-level curve ops for custom DH
+
+# ─── Phase 1: Iroh Networking Engine ──────────────────────────────────────────
+iroh = { version = "0.32", features = ["discovery-local-network", "discovery-pkarr-dht"] }
+iroh-base = "0.32"             # NodeId, SecretKey, tickets, node addresses
+iroh-relay = "0.32"            # Relay client for fallback connectivity
+
+# ─── Phase 2: CRDT Engine (Loro) ──────────────────────────────────────────────
+loro = "1"                     # Loro CRDT — Send+Sync, columnar encoding
+# yrs = "0.21"                 # KEPT (feature-gated) for V2→V3 migration only
+
+# ─── Phase 3: Protocol Buffers (compact wire format) ─────────────────────────
+prost = "0.13"                 # Protocol Buffers encoding for messages
+prost-types = "0.13"           # Well-known protobuf types (Timestamp, etc.)
+bytes = "1"                    # Efficient byte buffer management
+
+# ─── Phase 4: Media / Audio ──────────────────────────────────────────────────
+# cpal = "0.15"                # Cross-platform audio I/O (uncomment when ready)
+# opus = "0.3"                 # Opus audio codec (uncomment when ready)
+
+# ─── Phase 5: Traffic Analysis Resistance ─────────────────────────────────────
+# (No extra deps — implemented with tokio timers + rand)
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+tracing = "0.1"                # Structured logging for transport diagnostics
+tracing-subscriber = "0.3"    # Log subscriber with filtering
+parking_lot = "0.12"           # Faster Mutex/RwLock than std
+dashmap = "6"                  # Concurrent hashmap for peer/doc state
+toml = "0.8"                   # Config file parsing (relay.toml)
+directories = "5"              # Platform-specific app data dirs
+thiserror = "2"                # Ergonomic error types
+anyhow = "1"                   # Error handling for transport internals
+hex = "0.4"                    # Hex encoding/decoding
+
+[lints.rust]
+unused_mut = "allow"
+
+[profile.release]
+opt-level = "s"          # Optimize for size (ideal for mobile APK)
+lto = "fat"              # Full cross-crate LTO — max dead-code elimination
+codegen-units = 1        # Single codegen unit — best optimisation, slower compile
+strip = true             # Strip ALL symbols (debug + symbol table) — saves ~2-4MB
+panic = "abort"          # No unwind tables — smaller binary
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+trash = "5"
+hostname = "0.4"
+tauri-plugin-updater = "2"
+# Email/SMTP/IMAP — desktop only (heavy deps, ~10MB+ in binary)
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "pool", "hostname"] }
+reqwest = { version = "0.13.2", features = ["json", "multipart", "form"] }
+imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }
+imap-proto = "0.16"
+mailparse = "0.14"
